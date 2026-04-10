@@ -49,8 +49,9 @@ export async function runCrawlerJob(searchQueries: string[]): Promise<void> {
           `[crawler] Found ${additionalPages.length} additional page(s) for query: "${query}"`,
         );
 
-        // allPageUrls: null means "already loaded first page", rest are URLs to navigate to
-        const allPageUrls: Array<string | null> = [null, ...additionalPages];
+        // allPageUrls: null = already-loaded first page; additionalPages[0] is a link to that
+        // same first page (HH.ru includes it in pagination), so we skip it with slice(1)
+        const allPageUrls: Array<string | null> = [null, ...additionalPages.slice(1)];
 
         let breakPageLoop = false;
 
@@ -136,10 +137,8 @@ export async function runCrawlerJob(searchQueries: string[]): Promise<void> {
               const bodyText: string = await page.evaluate(
                 () => (document.body as HTMLElement).innerText,
               );
-              const pubMatch = bodyText.match(
-                /Вакансия опубликована \d+\s\w+\s\d+.*/,
-              );
-              const publicationDate = pubMatch ? pubMatch[0] : '';
+              const pubMatch = bodyText.match(`Вакансия опубликована (.*) в`);
+              const publicationDate = pubMatch ? pubMatch[1] : '';
 
               await saveVacancy({
                 uuid: uuidv4(),

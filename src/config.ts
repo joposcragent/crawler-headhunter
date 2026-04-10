@@ -6,7 +6,7 @@ export const config = {
   port: parseInt(optional('PORT', '8080'), 10),
 
   baseUrl: optional('BASE_URL', 'https://hh.ru'),
-  hhSearchUrl: optional('HH_SEARCH_URL', 'https://hh.ru/search/vacancy?text='),
+  hhSearchUrl: optional('HH_SEARCH_URL', 'https://hh.ru/search/vacancy?'),
   jobPostingsCrudUrl: optional('JOB_POSTINGS_CRUD_URL', 'http://job-postings-crud:8080'),
 
   delayMinMs: parseInt(optional('DELAY_MIN_MS', '4000'), 10),
