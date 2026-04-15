@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
-const imageName = process.env.DOCKER_IMAGE_NAME ?? pkg.name;
+const imageName = process.env.DOCKER_IMAGE_NAME ?? `joposcragent/${pkg.name}`;
 const imageVersion = process.env.DOCKER_IMAGE_VERSION ?? pkg.version;
 const ref = `${imageName}:${imageVersion}`;
 

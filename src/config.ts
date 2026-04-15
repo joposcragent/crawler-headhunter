@@ -10,7 +10,7 @@ function optional(name: string, defaultValue: string): string {
 }
 
 export const config = {
-  port: parseInt(optional('PORT', '3000'), 10),
+  port: parseInt(optional('SERVER_PORT', '3000'), 10),
 
   baseUrl: optional('BASE_URL', 'https://hh.ru'),
   hhSearchUrl: optional('HH_SEARCH_URL', 'https://hh.ru/search/vacancy?'),
