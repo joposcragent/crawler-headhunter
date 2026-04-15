@@ -5,8 +5,8 @@ import { config } from '../config.js';
 chromium.use(StealthPlugin());
 
 export async function createBrowser() {
-  console.log('[browser] Launching Chromium with stealth plugin');
-  return chromium.launch({ headless: true });
+  console.log(`[browser] Launching Chromium with stealth plugin (headless=${config.headless})`);
+  return chromium.launch({ headless: config.headless });
 }
 
 export async function createContext(browser: Awaited<ReturnType<typeof createBrowser>>) {

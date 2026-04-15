@@ -18,6 +18,52 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+const RU_MONTHS: Record<string, string> = {
+  января: '01',
+  февраля: '02',
+  марта: '03',
+  апреля: '04',
+  мая: '05',
+  июня: '06',
+  июля: '07',
+  августа: '08',
+  сентября: '09',
+  октября: '10',
+  ноября: '11',
+  декабря: '12',
+};
+
+/** YYYY-MM-DD for job-postings-crud (OpenAPI date-time / DB varchar). */
+function parsePublicationDateIso(bodyText: string): string {
+  const m = bodyText.match(/Вакансия опубликована\s+(\d+)\s+([а-яёА-ЯЁ]+)\s+(\d{4})/);
+  if (!m) {
+    return new Date().toISOString().slice(0, 10);
+  }
+  const day = m[1].padStart(2, '0');
+  const month = RU_MONTHS[m[2].toLowerCase()];
+  const year = m[3];
+  if (!month) {
+    return new Date().toISOString().slice(0, 10);
+  }
+  return `${year}-${month}-${day}`;
+}
+
+/** Full hh.ru query string (area=1&text=...) vs plain keywords for ?text= */
+function looksLikeUrlQueryString(q: string): boolean {
+  return /^[a-zA-Z0-9_]+=/.test(q.trim());
+}
+
+function buildSearchUrl(query: string): string {
+  const q = query.trim();
+  if (looksLikeUrlQueryString(q)) {
+    const base = config.baseUrl.replace(/\/$/, '');
+    return `${base}/search/vacancy?${q}`;
+  }
+  return `${config.hhSearchUrl}${encodeURIComponent(q)}`;
+}
+
+const NAV_WAIT_UNTIL = 'domcontentloaded' as const;
+
 export async function runCrawlerJob(searchQueries: string[]): Promise<void> {
   console.log(`[crawler] Job started with ${searchQueries.length} search queries`);
   const browser = await createBrowser();
@@ -30,8 +76,8 @@ export async function runCrawlerJob(searchQueries: string[]): Promise<void> {
       console.log(`[crawler] Processing search query: "${query}"`);
 
       try {
-        const searchUrl = `${config.hhSearchUrl}${encodeURIComponent(query)}`;
-        await page.goto(searchUrl, { waitUntil: 'load' });
+        const searchUrl = buildSearchUrl(query);
+        await page.goto(searchUrl, { waitUntil: NAV_WAIT_UNTIL });
         await randomDelay();
 
         // Collect pagination links from first (already loaded) page
@@ -60,7 +106,7 @@ export async function runCrawlerJob(searchQueries: string[]): Promise<void> {
 
           if (pageUrl !== null) {
             console.log(`[crawler] Navigating to next page: ${pageUrl}`);
-            await page.goto(pageUrl, { waitUntil: 'load' });
+            await page.goto(pageUrl, { waitUntil: NAV_WAIT_UNTIL });
             await randomDelay();
           }
 
@@ -118,13 +164,14 @@ export async function runCrawlerJob(searchQueries: string[]): Promise<void> {
           console.log(`[crawler] ${newUids.length} new vacancy(ies) to save`);
 
           const newCards = cards.filter((c) => newUids.includes(c.uid));
+          const totalCards = newCards.length;
 
-          for (const card of newCards) {
+          for (const [index, card] of newCards.entries()){
             try {
               console.log(
-                `[crawler] Fetching vacancy: ${card.uid} "${card.title}"`,
+                `[crawler] Fetching vacancy: ${index + 1} of ${totalCards}: ${card.uid} "${card.title}"`,
               );
-              await page.goto(card.url, { waitUntil: 'load' });
+              await page.goto(card.url, { waitUntil: NAV_WAIT_UNTIL });
               await randomDelay();
 
               // Extract content and strip HTML tags
@@ -133,13 +180,10 @@ export async function runCrawlerJob(searchQueries: string[]): Promise<void> {
                 .catch(() => '');
               const content = stripHtml(contentHtml);
 
-              // Extract publication date text from page body
               const bodyText: string = await page.evaluate(
                 () => (document.body as HTMLElement).innerText,
               );
-              const pubMatch = bodyText.match(`Вакансия опубликована (.*) в`);
-              const publicationDate = pubMatch ? pubMatch[1] : '';
-
+              const publicationDate = parsePublicationDateIso(bodyText);
               await saveVacancy({
                 uuid: uuidv4(),
                 uid: card.uid,

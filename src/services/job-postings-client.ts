@@ -30,6 +30,7 @@ export interface VacancyPayload {
 
 export async function saveVacancy(payload: VacancyPayload): Promise<void> {
   await client.post(`/job-postings/${payload.uuid}`, {
+    uuid: payload.uuid,
     uid: payload.uid,
     title: payload.title,
     url: payload.url,

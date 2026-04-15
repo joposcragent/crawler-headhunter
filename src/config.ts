@@ -1,3 +1,10 @@
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: join(__dirname, '..', '.env') });
+
 function optional(name: string, defaultValue: string): string {
   return process.env[name] ?? defaultValue;
 }
@@ -38,6 +45,8 @@ export const config = {
     'SELECTOR_VACANCY_LIST_CARD_COMPANY',
     'span[data-qa="vacancy-serp__vacancy-employer-text"]',
   ),
+  headless: optional('BROWSER_HEADLESS', 'true') !== 'false',
+
   selectorVacancyCardContent: optional(
     'SELECTOR_VACANCY_CARD_CONTENT',
     'div[data-qa="vacancy-description"]',
