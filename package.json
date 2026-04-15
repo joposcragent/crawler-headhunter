@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "build:image": "node scripts/build-image.mjs"
   },
   "dependencies": {
     "@zorilla/playwright-extra": "^1.0.2",
