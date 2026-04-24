@@ -16,8 +16,8 @@ export const config = {
   hhSearchUrl: optional('HH_SEARCH_URL', 'https://hh.ru/search/vacancy?'),
   jobPostingsCrudUrl: optional('JOB_POSTINGS_CRUD_URL', 'http://job-postings-crud:8080'),
   celeryOrchestratorUrl: optional(
-    'CELERY_ORCHESTRATOR_URL',
-    'http://celery-orchestrator:8000',
+    'CELERY_ORCHESTRATOR_BASE_URL',
+    'http://celery-orchestrator-api:8000',
   ),
 
   delayMinMs: parseInt(optional('DELAY_MIN_MS', '4000'), 10),
