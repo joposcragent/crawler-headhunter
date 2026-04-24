@@ -1,11 +1,14 @@
 import { chromium } from '@zorilla/playwright-extra';
 import StealthPlugin from '@zorilla/puppeteer-extra-plugin-stealth';
 import { config } from '../config.js';
+import { createServiceLogger } from '../logger.js';
 
 chromium.use(StealthPlugin());
 
+const logger = createServiceLogger('[browser]');
+
 export async function createBrowser() {
-  console.log(`[browser] Launching Chromium with stealth plugin (headless=${config.headless})`);
+  logger.info(`Launching Chromium with stealth plugin (headless=${config.headless})`);
   return chromium.launch({ headless: config.headless });
 }
 

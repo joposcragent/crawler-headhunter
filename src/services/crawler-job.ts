@@ -1,6 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config.js';
+import { createServiceLogger } from '../logger.js';
 import { createBrowser, createContext } from '../utils/browser.js';
+
+const logger = createServiceLogger('[crawler]');
 import { randomDelay } from '../utils/delay.js';
 import { getNonExistentUids, saveVacancy } from './job-postings-client.js';
 
@@ -12,10 +15,13 @@ interface CardData {
 }
 
 function stripHtml(html: string): string {
-  return html
+  const withSpaces = html
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#160;/gi, ' ')
+    .replace(/&#x0*A0;/gi, ' ')
     .replace(/<[^>]*>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/\u00a0/g, ' ');
+  return withSpaces.replace(/\s+/g, ' ').trim();
 }
 
 const RU_MONTHS: Record<string, string> = {
@@ -64,152 +70,143 @@ function buildSearchUrl(query: string): string {
 
 const NAV_WAIT_UNTIL = 'domcontentloaded' as const;
 
-export async function runCrawlerJob(searchQueries: string[]): Promise<void> {
-  console.log(`[crawler] Job started with ${searchQueries.length} search queries`);
+export async function runCrawlerJob(searchQuery: string): Promise<void> {
+  logger.info(`Job started for search query: "${searchQuery}"`);
   const browser = await createBrowser();
 
   try {
     const context = await createContext(browser);
     const page = await context.newPage();
 
-    for (const query of searchQueries) {
-      console.log(`[crawler] Processing search query: "${query}"`);
+    try {
+      const searchUrl = buildSearchUrl(searchQuery);
+      await page.goto(searchUrl, { waitUntil: NAV_WAIT_UNTIL });
+      await randomDelay();
 
-      try {
-        const searchUrl = buildSearchUrl(query);
-        await page.goto(searchUrl, { waitUntil: NAV_WAIT_UNTIL });
-        await randomDelay();
+      // Collect pagination links from first (already loaded) page
+      const pageHrefs = await page
+        .$$eval(config.selectorVacancyListPagesLinks, (els) =>
+          els.map((el) => el.getAttribute('href') ?? ''),
+        )
+        .catch(() => [] as string[]);
 
-        // Collect pagination links from first (already loaded) page
-        const pageHrefs = await page
-          .$$eval(config.selectorVacancyListPagesLinks, (els) =>
-            els.map((el) => el.getAttribute('href') ?? ''),
+      const additionalPages = pageHrefs
+        .filter(Boolean)
+        .map((href) => `${config.baseUrl}${href}`);
+
+      logger.info(
+        `Found ${additionalPages.length} additional page(s) for query: "${searchQuery}"`,
+      );
+
+      // allPageUrls: null = already-loaded first page; additionalPages[0] is a link to that
+      // same first page (HH.ru includes it in pagination), so we skip it with slice(1)
+      const allPageUrls: Array<string | null> = [null, ...additionalPages.slice(1)];
+
+      let breakPageLoop = false;
+
+      for (const pageUrl of allPageUrls) {
+        if (breakPageLoop) break;
+
+        if (pageUrl !== null) {
+          logger.info(`Navigating to next page: ${pageUrl}`);
+          await page.goto(pageUrl, { waitUntil: NAV_WAIT_UNTIL });
+          await randomDelay();
+        }
+
+        // Collect vacancy cards from current page
+        const cards = await page
+          .$$eval(
+            config.selectorVacancyListCards,
+            (
+              els,
+              args: { titleSel: string; companySel: string; baseUrl: string },
+            ) =>
+              els.map((el) => ({
+                uid: el.id,
+                title:
+                  el.querySelector(args.titleSel)?.textContent?.trim() ?? '',
+                company:
+                  el.querySelector(args.companySel)?.textContent?.trim() ??
+                  '',
+                url: `${args.baseUrl}/vacancy/${el.id}`,
+              })),
+            {
+              titleSel: config.selectorVacancyListCardTitle,
+              companySel: config.selectorVacancyListCardCompany,
+              baseUrl: config.baseUrl,
+            },
           )
-          .catch(() => [] as string[]);
+          .catch(() => [] as CardData[]);
 
-        const additionalPages = pageHrefs
-          .filter(Boolean)
-          .map((href) => `${config.baseUrl}${href}`);
+        const uids = cards.map((c) => c.uid).filter(Boolean);
 
-        console.log(
-          `[crawler] Found ${additionalPages.length} additional page(s) for query: "${query}"`,
-        );
+        if (uids.length === 0) {
+          logger.info('No vacancy cards found on page, stopping');
+          break;
+        }
 
-        // allPageUrls: null = already-loaded first page; additionalPages[0] is a link to that
-        // same first page (HH.ru includes it in pagination), so we skip it with slice(1)
-        const allPageUrls: Array<string | null> = [null, ...additionalPages.slice(1)];
+        logger.info(`Found ${uids.length} vacancy cards on page`);
 
-        let breakPageLoop = false;
+        // Filter to only uids not yet in DB
+        let newUids: string[];
+        try {
+          newUids = await getNonExistentUids(uids);
+        } catch (error) {
+          logger.info('Error checking non-existent uids', { error });
+          break;
+        }
 
-        for (const pageUrl of allPageUrls) {
-          if (breakPageLoop) break;
+        if (newUids.length === 0) {
+          logger.info('All uids already in DB — stopping page loop for this query');
+          breakPageLoop = true;
+          break;
+        }
 
-          if (pageUrl !== null) {
-            console.log(`[crawler] Navigating to next page: ${pageUrl}`);
-            await page.goto(pageUrl, { waitUntil: NAV_WAIT_UNTIL });
-            await randomDelay();
-          }
+        logger.info(`${newUids.length} new vacancy(ies) to save`);
 
-          // Collect vacancy cards from current page
-          const cards = await page
-            .$$eval(
-              config.selectorVacancyListCards,
-              (
-                els,
-                args: { titleSel: string; companySel: string; baseUrl: string },
-              ) =>
-                els.map((el) => ({
-                  uid: el.id,
-                  title:
-                    el.querySelector(args.titleSel)?.textContent?.trim() ?? '',
-                  company:
-                    el.querySelector(args.companySel)?.textContent?.trim() ??
-                    '',
-                  url: `${args.baseUrl}/vacancy/${el.id}`,
-                })),
-              {
-                titleSel: config.selectorVacancyListCardTitle,
-                companySel: config.selectorVacancyListCardCompany,
-                baseUrl: config.baseUrl,
-              },
-            )
-            .catch(() => [] as CardData[]);
+        const newCards = cards.filter((c) => newUids.includes(c.uid));
+        const totalCards = newCards.length;
 
-          const uids = cards.map((c) => c.uid).filter(Boolean);
-
-          if (uids.length === 0) {
-            console.log('[crawler] No vacancy cards found on page, stopping');
-            break;
-          }
-
-          console.log(`[crawler] Found ${uids.length} vacancy cards on page`);
-
-          // Filter to only uids not yet in DB
-          let newUids: string[];
+        for (const [index, card] of newCards.entries()) {
           try {
-            newUids = await getNonExistentUids(uids);
-          } catch (error) {
-            console.log('[crawler] Error checking non-existent uids:', error);
-            break;
-          }
-
-          if (newUids.length === 0) {
-            console.log(
-              '[crawler] All uids already in DB — stopping page loop for this query',
+            logger.info(
+              `Fetching vacancy: ${index + 1} of ${totalCards}: ${card.uid} "${card.title}"`,
             );
-            breakPageLoop = true;
-            break;
-          }
+            await page.goto(card.url, { waitUntil: NAV_WAIT_UNTIL });
+            await randomDelay();
 
-          console.log(`[crawler] ${newUids.length} new vacancy(ies) to save`);
+            // Extract content and strip HTML tags
+            const contentHtml = await page
+              .$eval(config.selectorVacancyCardContent, (el) => el.innerHTML)
+              .catch(() => '');
+            const content = stripHtml(contentHtml);
 
-          const newCards = cards.filter((c) => newUids.includes(c.uid));
-          const totalCards = newCards.length;
+            const bodyText: string = await page.evaluate(
+              () => (document.body as HTMLElement).innerText,
+            );
+            const publicationDate = parsePublicationDateIso(bodyText);
+            await saveVacancy({
+              uuid: uuidv4(),
+              uid: card.uid,
+              title: card.title,
+              url: card.url,
+              company: card.company,
+              content,
+              publicationDate,
+            });
 
-          for (const [index, card] of newCards.entries()){
-            try {
-              console.log(
-                `[crawler] Fetching vacancy: ${index + 1} of ${totalCards}: ${card.uid} "${card.title}"`,
-              );
-              await page.goto(card.url, { waitUntil: NAV_WAIT_UNTIL });
-              await randomDelay();
-
-              // Extract content and strip HTML tags
-              const contentHtml = await page
-                .$eval(config.selectorVacancyCardContent, (el) => el.innerHTML)
-                .catch(() => '');
-              const content = stripHtml(contentHtml);
-
-              const bodyText: string = await page.evaluate(
-                () => (document.body as HTMLElement).innerText,
-              );
-              const publicationDate = parsePublicationDateIso(bodyText);
-              await saveVacancy({
-                uuid: uuidv4(),
-                uid: card.uid,
-                title: card.title,
-                url: card.url,
-                company: card.company,
-                content,
-                publicationDate,
-              });
-
-              console.log(`[crawler] Saved vacancy: ${card.uid}`);
-            } catch (error) {
-              console.log(
-                `[crawler] Error on vacancy ${card.uid}, skipping:`,
-                error,
-              );
-              // skip-and-continue
-            }
+            logger.info(`Saved vacancy: ${card.uid}`);
+          } catch (error) {
+            logger.info(`Error on vacancy ${card.uid}, skipping`, { error });
+            // skip-and-continue
           }
         }
-      } catch (error) {
-        console.log(`[crawler] Error on query "${query}", skipping:`, error);
       }
+    } catch (error) {
+      logger.info(`Error on query "${searchQuery}", skipping`, { error });
     }
   } finally {
-    console.log('[crawler] Job complete, closing browser');
+    logger.info('Job complete, closing browser');
     await browser.close();
   }
 }

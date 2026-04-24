@@ -1,23 +1,25 @@
 import type { FastifyInstance } from 'fastify';
+import { createServiceLogger } from '../logger.js';
 import { runCrawlerJob } from '../services/crawler-job.js';
+
+const logger = createServiceLogger('[route]');
 
 let isRunning = false;
 
 const bodySchema = {
   type: 'object',
-  required: ['list'],
+  required: ['query'],
   properties: {
-    list: {
-      type: 'array',
-      items: { type: 'string' },
-      minItems: 1,
+    query: {
+      type: 'string',
+      minLength: 1,
     },
   },
   additionalProperties: false,
 } as const;
 
 interface StartBody {
-  list: string[];
+  query: string;
 }
 
 export async function crawlerRoutes(fastify: FastifyInstance): Promise<void> {
@@ -25,21 +27,24 @@ export async function crawlerRoutes(fastify: FastifyInstance): Promise<void> {
     '/crawler/start',
     { schema: { body: bodySchema } },
     async (request, reply) => {
+      if (!request.body.query.trim()) {
+        return reply.code(400).send();
+      }
       if (isRunning) {
-        console.log('[route] Crawler already running, ignoring duplicate request');
+        logger.info('Crawler already running, ignoring duplicate request');
         return reply.code(200).send();
       }
 
       isRunning = true;
-      console.log('[route] Starting crawler job in background');
+      logger.info('Starting crawler job in background');
 
-      runCrawlerJob(request.body.list)
+      runCrawlerJob(request.body.query.trim())
         .catch((error: unknown) => {
-          console.log('[route] Crawler job error:', error);
+          logger.error('Crawler job error', { error });
         })
         .finally(() => {
           isRunning = false;
-          console.log('[route] Crawler job finished, ready for next request');
+          logger.info('Crawler job finished, ready for next request');
         });
 
       return reply.code(200).send();
