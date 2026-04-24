@@ -1,7 +1,12 @@
 import util from 'node:util';
+import type TransportStream from 'winston-transport';
 import winston from 'winston';
 
 const { combine, timestamp, printf } = winston.format;
+
+export type CreateServiceLoggerOptions = {
+  extraTransports?: TransportStream[];
+};
 
 const lineFormat = printf((info) => {
   const ts = String(info.timestamp ?? '');
@@ -17,11 +22,18 @@ const lineFormat = printf((info) => {
   return `${ts} ${prefix} ${level}: ${String(message)}${tail}`;
 });
 
-export function createServiceLogger(prefix: string): winston.Logger {
+export function createServiceLogger(
+  prefix: string,
+  options?: CreateServiceLoggerOptions,
+): winston.Logger {
+  const transports: winston.transport[] = [
+    new winston.transports.Console(),
+    ...(options?.extraTransports ?? []),
+  ];
   return winston.createLogger({
     level: 'info',
     defaultMeta: { prefix },
     format: combine(timestamp(), lineFormat),
-    transports: [new winston.transports.Console()],
+    transports,
   });
 }

@@ -1,11 +1,15 @@
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config.js';
+import { createVacancyLogCapture } from '../logging/vacancy-log-buffer-transport.js';
 import { createServiceLogger } from '../logger.js';
 import { createBrowser, createContext } from '../utils/browser.js';
-
-const logger = createServiceLogger('[crawler]');
 import { randomDelay } from '../utils/delay.js';
 import { getNonExistentUids, saveVacancy } from './job-postings-client.js';
+
+const vacancyLogCapture = createVacancyLogCapture();
+const logger = createServiceLogger('[crawler]', {
+  extraTransports: [vacancyLogCapture.transport],
+});
 
 interface CardData {
   uid: string;
@@ -168,6 +172,8 @@ export async function runCrawlerJob(searchQuery: string): Promise<void> {
         const totalCards = newCards.length;
 
         for (const [index, card] of newCards.entries()) {
+          vacancyLogCapture.begin();
+          let vacancyFetchStatus: 'SUCCEEDED' | 'FAILED' = 'SUCCEEDED';
           try {
             logger.info(
               `Fetching vacancy: ${index + 1} of ${totalCards}: ${card.uid} "${card.title}"`,
@@ -199,7 +205,10 @@ export async function runCrawlerJob(searchQuery: string): Promise<void> {
           } catch (error) {
             logger.info(`Error on vacancy ${card.uid}, skipping`, { error });
             // skip-and-continue
+            vacancyFetchStatus = 'FAILED';
           }
+          const vacancyLog = vacancyLogCapture.takeAndClear();
+          // TODO: send vacancy log to Celery Orchestrator
         }
       }
     } catch (error) {
