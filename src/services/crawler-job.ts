@@ -158,15 +158,18 @@ export async function runCrawlerJob(
                   () => (document.body as HTMLElement).innerText,
                 );
                 const publicationDate = parsePublicationDateIso(bodyText);
-                await saveVacancy({
-                  uuid: jobPostingUuid,
-                  uid: card.uid,
-                  title: card.title,
-                  url: card.url,
-                  company: card.company,
-                  content,
-                  publicationDate,
-                });
+                await saveVacancy(
+                  {
+                    uuid: jobPostingUuid,
+                    uid: card.uid,
+                    title: card.title,
+                    url: card.url,
+                    company: card.company,
+                    content,
+                    publicationDate,
+                  },
+                  { correlationId },
+                );
 
                 savedCount += 1;
                 logger.info(`Saved vacancy: ${card.uid}`);

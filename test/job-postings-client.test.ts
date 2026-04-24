@@ -3,10 +3,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const PORT = 38437;
 
+let lastPostHeaders: http.IncomingHttpHeaders | null = null;
+
 describe('job-postings-client', () => {
   let server: http.Server;
 
   beforeAll(async () => {
+    lastPostHeaders = null;
     server = http.createServer((req, res) => {
       const bodyChunks: Buffer[] = [];
       req.on('data', (c) => bodyChunks.push(c));
@@ -26,6 +29,7 @@ describe('job-postings-client', () => {
           return;
         }
         if (req.url?.startsWith('/job-postings/') && req.method === 'POST') {
+          lastPostHeaders = { ...req.headers };
           res.writeHead(201);
           res.end();
           return;
@@ -68,5 +72,24 @@ describe('job-postings-client', () => {
         publicationDate: '2025-01-01',
       }),
     ).resolves.toBeUndefined();
+    expect(lastPostHeaders?.['x-joposcragent-correlationid']).toBeUndefined();
+  });
+
+  it('saveVacancy sends X-Joposcragent-correlationId when correlationId is set', async () => {
+    const { saveVacancy } = await import('../src/services/job-postings-client.js');
+    const cid = '550e8400-e29b-41d4-a716-446655440099';
+    await saveVacancy(
+      {
+        uuid: '550e8400-e29b-41d4-a716-446655440011',
+        uid: 'u2',
+        title: 't2',
+        url: 'http://y',
+        company: 'c2',
+        content: 'b2',
+        publicationDate: '2025-02-02',
+      },
+      { correlationId: cid },
+    );
+    expect(lastPostHeaders?.['x-joposcragent-correlationid']).toBe(cid);
   });
 });

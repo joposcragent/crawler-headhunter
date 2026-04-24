@@ -28,14 +28,24 @@ export interface VacancyPayload {
   publicationDate: string;
 }
 
-export async function saveVacancy(payload: VacancyPayload): Promise<void> {
-  await client.post(`/job-postings/${payload.uuid}`, {
-    uuid: payload.uuid,
-    uid: payload.uid,
-    title: payload.title,
-    url: payload.url,
-    company: payload.company,
-    content: payload.content,
-    publicationDate: payload.publicationDate,
-  });
+export async function saveVacancy(
+  payload: VacancyPayload,
+  options?: { correlationId?: string },
+): Promise<void> {
+  const cid = options?.correlationId?.trim() ?? '';
+  const requestConfig =
+    cid.length > 0 ? { headers: { 'X-Joposcragent-correlationId': cid } } : {};
+  await client.post(
+    `/job-postings/${payload.uuid}`,
+    {
+      uuid: payload.uuid,
+      uid: payload.uid,
+      title: payload.title,
+      url: payload.url,
+      company: payload.company,
+      content: payload.content,
+      publicationDate: payload.publicationDate,
+    },
+    requestConfig,
+  );
 }
