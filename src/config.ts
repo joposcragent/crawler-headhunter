@@ -15,6 +15,10 @@ export const config = {
   baseUrl: optional('BASE_URL', 'https://hh.ru'),
   hhSearchUrl: optional('HH_SEARCH_URL', 'https://hh.ru/search/vacancy?'),
   jobPostingsCrudUrl: optional('JOB_POSTINGS_CRUD_URL', 'http://job-postings-crud:8080'),
+  celeryOrchestratorUrl: optional(
+    'CELERY_ORCHESTRATOR_URL',
+    'http://celery-orchestrator:8000',
+  ),
 
   delayMinMs: parseInt(optional('DELAY_MIN_MS', '4000'), 10),
   delayMaxMs: parseInt(optional('DELAY_MAX_MS', '37000'), 10),

@@ -1,6 +1,6 @@
 {
   "name": "crawler-headhunter",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "HH.ru vacancy crawler service",
   "type": "module",
   "main": "dist/index.js",
@@ -8,7 +8,9 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "build:image": "node scripts/build-image.mjs"
+    "build:image": "node scripts/build-image.mjs",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@zorilla/playwright-extra": "^1.0.2",
@@ -22,7 +24,9 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
+    "@vitest/coverage-v8": "^3.2.4",
     "tsx": "^4.19.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
   }
 }

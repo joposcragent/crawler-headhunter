@@ -38,7 +38,15 @@ export async function crawlerRoutes(fastify: FastifyInstance): Promise<void> {
       isRunning = true;
       logger.info('Starting crawler job in background');
 
-      runCrawlerJob(request.body.query.trim())
+      const rawCorrelation = request.headers['x-joposcragent-correlationid'];
+      const correlationId =
+        typeof rawCorrelation === 'string'
+          ? rawCorrelation
+          : Array.isArray(rawCorrelation)
+            ? rawCorrelation[0]
+            : undefined;
+
+      runCrawlerJob(request.body.query.trim(), correlationId)
         .catch((error: unknown) => {
           logger.error('Crawler job error', { error });
         })
