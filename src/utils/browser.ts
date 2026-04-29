@@ -5,9 +5,8 @@ import { createServiceLogger } from '../logger.js';
 
 chromium.use(StealthPlugin());
 
-const logger = createServiceLogger('[browser]');
-
-export async function createBrowser() {
+export async function createBrowser(runId: string) {
+  const logger = createServiceLogger(`[browser][${runId}]`);
   logger.info(`Launching Chromium with stealth plugin (headless=${config.headless})`);
   return chromium.launch({ headless: config.headless });
 }

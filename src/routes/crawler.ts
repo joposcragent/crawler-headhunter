@@ -1,10 +1,9 @@
 import type { FastifyInstance } from 'fastify';
+import { v4 as uuidv4 } from 'uuid';
 import { createServiceLogger } from '../logger.js';
 import { runCrawlerJob } from '../services/crawler-job.js';
 
 const logger = createServiceLogger('[route]');
-
-let isRunning = false;
 
 const bodySchema = {
   type: 'object',
@@ -30,13 +29,9 @@ export async function crawlerRoutes(fastify: FastifyInstance): Promise<void> {
       if (!request.body.query.trim()) {
         return reply.code(400).send();
       }
-      if (isRunning) {
-        logger.info('Crawler already running, ignoring duplicate request');
-        return reply.code(200).send();
-      }
 
-      isRunning = true;
-      logger.info('Starting crawler job in background');
+      const runId = uuidv4();
+      logger.info('Starting crawler job in background', { runId });
 
       const rawCorrelation = request.headers['x-joposcragent-correlationid'];
       const correlationId =
@@ -46,13 +41,12 @@ export async function crawlerRoutes(fastify: FastifyInstance): Promise<void> {
             ? rawCorrelation[0]
             : undefined;
 
-      runCrawlerJob(request.body.query.trim(), correlationId)
+      runCrawlerJob(request.body.query.trim(), correlationId, runId)
         .catch((error: unknown) => {
-          logger.error('Crawler job error', { error });
+          logger.error('Crawler job error', { error, runId });
         })
         .finally(() => {
-          isRunning = false;
-          logger.info('Crawler job finished, ready for next request');
+          logger.info('Crawler job finished', { runId });
         });
 
       return reply.code(200).send();

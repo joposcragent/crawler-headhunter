@@ -2,8 +2,6 @@ import axios, { type AxiosInstance } from 'axios';
 import { config } from '../config.js';
 import { createServiceLogger } from '../logger.js';
 
-const logger = createServiceLogger('[events-producer]');
-
 let defaultClient: AxiosInstance | null = null;
 
 function orchestratorClient(): AxiosInstance {
@@ -37,6 +35,8 @@ export type FinishParams = {
 
 export type EventsProducerDeps = {
   client?: AxiosInstance;
+  /** Identifies the crawl run in logs (orchestrator payloads unchanged). */
+  runId?: string;
 };
 
 export type EventsProducer = {
@@ -53,41 +53,42 @@ export type EventsProducer = {
   sendFinish: (params: FinishParams) => Promise<void>;
 };
 
-async function postJson(
-  client: AxiosInstance,
-  path: string,
-  body: Record<string, unknown>,
-): Promise<void> {
-  try {
-    const response = await client.post(path, body, {
-      validateStatus: () => true,
-    });
-    if (response.status !== 204) {
-      logger.info('Orchestrator returned non-204', {
-        path,
-        status: response.status,
-        data: response.data,
-      });
-    }
-  } catch (error: unknown) {
-    logger.info('Orchestrator request failed', { path, error });
-  }
-}
-
 export function createEventsProducer(
   correlationId: string | undefined,
   deps?: EventsProducerDeps,
 ): EventsProducer {
+  const runId = deps?.runId ?? 'na';
+  const logger = createServiceLogger(`[events-producer][${runId}]`);
   const id = correlationId?.trim() ?? '';
   const enabled = id.length > 0;
   const client = deps?.client ?? orchestratorClient();
+
+  async function postJson(
+    path: string,
+    body: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      const response = await client.post(path, body, {
+        validateStatus: () => true,
+      });
+      if (response.status !== 204) {
+        logger.info('Orchestrator returned non-204', {
+          path,
+          status: response.status,
+          data: response.data,
+        });
+      }
+    } catch (error: unknown) {
+      logger.info('Orchestrator request failed', { path, error });
+    }
+  }
 
   return {
     async sendVacancyProgress(params): Promise<void> {
       if (!enabled) {
         return;
       }
-      await postJson(client, '/events-queue/progress', {
+      await postJson('/events-queue/progress', {
         correlationId: id,
         createdAt: params.createdAt,
         executionLog: params.executionLog,
@@ -101,7 +102,7 @@ export function createEventsProducer(
         return;
       }
       const createdAt = new Date().toISOString();
-      await postJson(client, '/events-queue/progress', {
+      await postJson('/events-queue/progress', {
         correlationId: id,
         createdAt,
         executionLog: `Обработана страница ${params.currentPage} из ${params.totalPages}`,
@@ -114,7 +115,7 @@ export function createEventsProducer(
       }
       const createdAt = new Date().toISOString();
       if (params.jobError != null) {
-        await postJson(client, '/events-queue/finish', {
+        await postJson('/events-queue/finish', {
           correlationId: id,
           createdAt,
           status: 'FAILED',
@@ -124,7 +125,7 @@ export function createEventsProducer(
         return;
       }
       const result = `Обработано страниц ${params.pagesProcessed}, загружено ${params.newVacanciesSaved} новых вакансий`;
-      await postJson(client, '/events-queue/finish', {
+      await postJson('/events-queue/finish', {
         correlationId: id,
         createdAt,
         status: 'SUCCEEDED',

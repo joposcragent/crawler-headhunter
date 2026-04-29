@@ -15,6 +15,8 @@ vi.mock('../src/utils/delay.js', () => ({
 const mockCreateBrowser = vi.fn();
 const mockCreateContext = vi.fn();
 
+const RUN_ID = '550e8400-e29b-41d4-a716-446655440aaa';
+
 vi.mock('../src/utils/browser.js', () => ({
   createBrowser: mockCreateBrowser,
   createContext: mockCreateContext,
@@ -57,8 +59,8 @@ describe('runCrawlerJob', () => {
       newPage: vi.fn().mockResolvedValue(makePage({ $$eval })),
     });
     const { runCrawlerJob } = await import('../src/services/crawler-job.js');
-    await runCrawlerJob('java');
-    expect(mockCreateBrowser).toHaveBeenCalled();
+    await runCrawlerJob('java', undefined, RUN_ID);
+    expect(mockCreateBrowser).toHaveBeenCalledWith(RUN_ID);
     expect($$eval).toHaveBeenCalled();
   });
 
@@ -72,7 +74,7 @@ describe('runCrawlerJob', () => {
     });
     mockGetNonExistentUids.mockRejectedValue(new Error('crud down'));
     const { runCrawlerJob } = await import('../src/services/crawler-job.js');
-    await expect(runCrawlerJob('q')).resolves.toBeUndefined();
+    await expect(runCrawlerJob('q', undefined, RUN_ID)).resolves.toBeUndefined();
     expect(mockGetNonExistentUids).toHaveBeenCalled();
   });
 
@@ -94,7 +96,7 @@ describe('runCrawlerJob', () => {
     });
     mockGetNonExistentUids.mockResolvedValue(['v1']);
     const { runCrawlerJob } = await import('../src/services/crawler-job.js');
-    await runCrawlerJob('keyword');
+    await runCrawlerJob('keyword', undefined, RUN_ID);
     expect(mockSaveVacancy).toHaveBeenCalledTimes(1);
     expect(mockSaveVacancy.mock.calls[0][0]).toMatchObject({
       uid: 'v1',

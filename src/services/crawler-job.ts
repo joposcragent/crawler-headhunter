@@ -12,11 +12,6 @@ import {
   stripHtml,
 } from './hh-crawl-helpers.js';
 
-const vacancyLogCapture = createVacancyLogCapture();
-const logger = createServiceLogger('[crawler]', {
-  extraTransports: [vacancyLogCapture.transport],
-});
-
 interface CardData {
   uid: string;
   title: string;
@@ -28,15 +23,20 @@ const NAV_WAIT_UNTIL = 'domcontentloaded' as const;
 
 export async function runCrawlerJob(
   searchQuery: string,
-  correlationId?: string,
+  correlationId: string | undefined,
+  runId: string,
 ): Promise<void> {
-  const events = createEventsProducer(correlationId);
+  const vacancyLogCapture = createVacancyLogCapture();
+  const logger = createServiceLogger(`[crawler][${runId}]`, {
+    extraTransports: [vacancyLogCapture.transport],
+  });
+  const events = createEventsProducer(correlationId, { runId });
   let jobError: unknown | null = null;
   let pagesProcessed = 0;
   let savedCount = 0;
 
   logger.info(`Job started for search query: "${searchQuery}"`);
-  const browser = await createBrowser();
+  const browser = await createBrowser(runId);
 
   try {
     try {

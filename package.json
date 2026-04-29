@@ -1,6 +1,6 @@
 {
   "name": "crawler-headhunter",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "HH.ru vacancy crawler service",
   "type": "module",
   "main": "dist/index.js",
