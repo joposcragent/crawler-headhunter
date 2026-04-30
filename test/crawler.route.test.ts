@@ -45,6 +45,29 @@ describe('crawlerRoutes', () => {
       expect.stringMatching(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       ),
+      false,
+    );
+    await app.close();
+  });
+
+  it('passes lazy=true to runCrawlerJob', async () => {
+    runCrawlerJobMock.mockClear();
+    const { crawlerRoutes } = await import('../src/routes/crawler.js');
+    const app = Fastify({ logger: false });
+    await app.register(crawlerRoutes);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/crawler/start',
+      payload: { query: 'go', lazy: true },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(runCrawlerJobMock).toHaveBeenCalledWith(
+      'go',
+      undefined,
+      expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      ),
+      true,
     );
     await app.close();
   });
@@ -74,6 +97,7 @@ describe('crawlerRoutes', () => {
       expect.stringMatching(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       ),
+      false,
     );
 
     const second = await app.inject({
@@ -91,6 +115,7 @@ describe('crawlerRoutes', () => {
       expect.stringMatching(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       ),
+      false,
     );
     expect(runCrawlerJobMock.mock.calls[0][2]).not.toBe(runCrawlerJobMock.mock.calls[1][2]);
 

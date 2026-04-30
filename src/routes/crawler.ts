@@ -13,12 +13,17 @@ const bodySchema = {
       type: 'string',
       minLength: 1,
     },
+    lazy: {
+      type: 'boolean',
+      default: false,
+    },
   },
   additionalProperties: false,
 } as const;
 
 interface StartBody {
   query: string;
+  lazy?: boolean;
 }
 
 export async function crawlerRoutes(fastify: FastifyInstance): Promise<void> {
@@ -41,7 +46,12 @@ export async function crawlerRoutes(fastify: FastifyInstance): Promise<void> {
             ? rawCorrelation[0]
             : undefined;
 
-      runCrawlerJob(request.body.query.trim(), correlationId, runId)
+      runCrawlerJob(
+        request.body.query.trim(),
+        correlationId,
+        runId,
+        request.body.lazy === true,
+      )
         .catch((error: unknown) => {
           logger.error('Crawler job error', { error, runId });
         })

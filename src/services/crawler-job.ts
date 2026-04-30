@@ -25,6 +25,7 @@ export async function runCrawlerJob(
   searchQuery: string,
   correlationId: string | undefined,
   runId: string,
+  lazy = false,
 ): Promise<void> {
   const vacancyLogCapture = createVacancyLogCapture();
   const logger = createServiceLogger(`[crawler][${runId}]`, {
@@ -67,13 +68,7 @@ export async function runCrawlerJob(
 
         const allPageUrls: Array<string | null> = [null, ...additionalPages.slice(1)];
 
-        let breakPageLoop = false;
-
         for (let pageIndex = 0; pageIndex < allPageUrls.length; pageIndex++) {
-          if (breakPageLoop) {
-            break;
-          }
-
           const pageUrl = allPageUrls[pageIndex];
 
           try {
@@ -125,15 +120,20 @@ export async function runCrawlerJob(
               break;
             }
 
-            if (newUids.length === 0) {
+            if (newUids.length === 0 && lazy) {
               logger.info(
-                'All uids already in DB — stopping page loop for this query',
+                'All uids on page already in DB — stopping page loop (lazy=true)',
               );
-              breakPageLoop = true;
               break;
             }
 
-            logger.info(`${newUids.length} new vacancy(ies) to save`);
+            if (newUids.length === 0) {
+              logger.info(
+                'All uids on page already in DB — continuing page loop (lazy=false)',
+              );
+            } else {
+              logger.info(`${newUids.length} new vacancy(ies) to save`);
+            }
 
             const newCards = cards.filter((c) => newUids.includes(c.uid));
             const totalCards = newCards.length;

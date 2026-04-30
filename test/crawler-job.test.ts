@@ -103,4 +103,55 @@ describe('runCrawlerJob', () => {
       title: 'Title',
     });
   });
+
+  it('with lazy=true stops page loop when all uids on page already exist', async () => {
+    const $$eval = vi
+      .fn()
+      .mockResolvedValueOnce(['/p2', '/p3'])
+      .mockResolvedValueOnce([
+        { uid: 'old', title: 't', company: 'c', url: 'http://hh.ru/vacancy/old' },
+      ]);
+    mockCreateContext.mockResolvedValue({
+      newPage: vi.fn().mockResolvedValue(makePage({ $$eval })),
+    });
+    mockGetNonExistentUids.mockResolvedValue([]);
+    const { runCrawlerJob } = await import('../src/services/crawler-job.js');
+    await runCrawlerJob('keyword', undefined, RUN_ID, true);
+    expect($$eval).toHaveBeenCalledTimes(2);
+    expect(mockSaveVacancy).not.toHaveBeenCalled();
+  });
+
+  it('with lazy=false continues when first page has no new uids', async () => {
+    const $$eval = vi
+      .fn()
+      .mockResolvedValueOnce(['/p2', '/p3'])
+      .mockResolvedValueOnce([
+        { uid: 'old', title: 't', company: 'c', url: 'http://hh.ru/vacancy/old' },
+      ])
+      .mockResolvedValueOnce([
+        {
+          uid: 'new',
+          title: 'T2',
+          company: 'C2',
+          url: 'http://hh.ru/vacancy/new',
+        },
+      ]);
+    const $eval = vi.fn().mockResolvedValue('<p>x</p>');
+    const evaluate = vi
+      .fn()
+      .mockResolvedValue('Вакансия опубликована 1 января 2025');
+    mockCreateContext.mockResolvedValue({
+      newPage: vi.fn().mockResolvedValue(
+        makePage({ $$eval, $eval, evaluate }),
+      ),
+    });
+    mockGetNonExistentUids
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(['new']);
+    const { runCrawlerJob } = await import('../src/services/crawler-job.js');
+    await runCrawlerJob('keyword', undefined, RUN_ID, false);
+    expect($$eval).toHaveBeenCalledTimes(3);
+    expect(mockSaveVacancy).toHaveBeenCalledTimes(1);
+    expect(mockSaveVacancy.mock.calls[0][0]).toMatchObject({ uid: 'new' });
+  });
 });
