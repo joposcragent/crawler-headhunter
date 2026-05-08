@@ -16,6 +16,7 @@ const mockCreateBrowser = vi.fn();
 const mockCreateContext = vi.fn();
 
 const RUN_ID = '550e8400-e29b-41d4-a716-446655440aaa';
+const SEARCH_QUERY_UUID = '550e8400-e29b-41d4-a716-4466554400b1';
 
 vi.mock('../src/utils/browser.js', () => ({
   createBrowser: mockCreateBrowser,
@@ -59,7 +60,7 @@ describe('runCrawlerJob', () => {
       newPage: vi.fn().mockResolvedValue(makePage({ $$eval })),
     });
     const { runCrawlerJob } = await import('../src/services/crawler-job.js');
-    await runCrawlerJob('java', undefined, RUN_ID);
+    await runCrawlerJob('java', SEARCH_QUERY_UUID, undefined, RUN_ID);
     expect(mockCreateBrowser).toHaveBeenCalledWith(RUN_ID);
     expect($$eval).toHaveBeenCalled();
   });
@@ -74,7 +75,7 @@ describe('runCrawlerJob', () => {
     });
     mockGetNonExistentUids.mockRejectedValue(new Error('crud down'));
     const { runCrawlerJob } = await import('../src/services/crawler-job.js');
-    await expect(runCrawlerJob('q', undefined, RUN_ID)).resolves.toBeUndefined();
+    await expect(runCrawlerJob('q', SEARCH_QUERY_UUID, undefined, RUN_ID)).resolves.toBeUndefined();
     expect(mockGetNonExistentUids).toHaveBeenCalled();
   });
 
@@ -96,11 +97,12 @@ describe('runCrawlerJob', () => {
     });
     mockGetNonExistentUids.mockResolvedValue(['v1']);
     const { runCrawlerJob } = await import('../src/services/crawler-job.js');
-    await runCrawlerJob('keyword', undefined, RUN_ID);
+    await runCrawlerJob('keyword', SEARCH_QUERY_UUID, undefined, RUN_ID);
     expect(mockSaveVacancy).toHaveBeenCalledTimes(1);
     expect(mockSaveVacancy.mock.calls[0][0]).toMatchObject({
       uid: 'v1',
       title: 'Title',
+      searchQueryUuid: SEARCH_QUERY_UUID,
     });
   });
 
@@ -116,7 +118,7 @@ describe('runCrawlerJob', () => {
     });
     mockGetNonExistentUids.mockResolvedValue([]);
     const { runCrawlerJob } = await import('../src/services/crawler-job.js');
-    await runCrawlerJob('keyword', undefined, RUN_ID, true);
+    await runCrawlerJob('keyword', SEARCH_QUERY_UUID, undefined, RUN_ID, true);
     expect($$eval).toHaveBeenCalledTimes(2);
     expect(mockSaveVacancy).not.toHaveBeenCalled();
   });
@@ -149,9 +151,12 @@ describe('runCrawlerJob', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce(['new']);
     const { runCrawlerJob } = await import('../src/services/crawler-job.js');
-    await runCrawlerJob('keyword', undefined, RUN_ID, false);
+    await runCrawlerJob('keyword', SEARCH_QUERY_UUID, undefined, RUN_ID, false);
     expect($$eval).toHaveBeenCalledTimes(3);
     expect(mockSaveVacancy).toHaveBeenCalledTimes(1);
-    expect(mockSaveVacancy.mock.calls[0][0]).toMatchObject({ uid: 'new' });
+    expect(mockSaveVacancy.mock.calls[0][0]).toMatchObject({
+      uid: 'new',
+      searchQueryUuid: SEARCH_QUERY_UUID,
+    });
   });
 });

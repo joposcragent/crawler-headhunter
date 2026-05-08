@@ -23,6 +23,7 @@ const NAV_WAIT_UNTIL = 'domcontentloaded' as const;
 
 export async function runCrawlerJob(
   searchQuery: string,
+  searchQueryUuid: string,
   correlationId: string | undefined,
   runId: string,
   lazy = false,
@@ -167,6 +168,7 @@ export async function runCrawlerJob(
                     company: card.company,
                     content,
                     publicationDate,
+                    searchQueryUuid,
                   },
                   { correlationId },
                 );

@@ -70,6 +70,7 @@ describe('job-postings-client', () => {
         company: 'c',
         content: 'body',
         publicationDate: '2025-01-01',
+        searchQueryUuid: '550e8400-e29b-41d4-a716-4466554400e1',
       }),
     ).resolves.toBeUndefined();
     expect(lastPostHeaders?.['x-joposcragent-correlationid']).toBeUndefined();
@@ -87,6 +88,7 @@ describe('job-postings-client', () => {
         company: 'c2',
         content: 'b2',
         publicationDate: '2025-02-02',
+        searchQueryUuid: '550e8400-e29b-41d4-a716-4466554400e2',
       },
       { correlationId: cid },
     );

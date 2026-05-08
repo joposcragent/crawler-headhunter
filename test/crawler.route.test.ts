@@ -12,6 +12,8 @@ vi.mock('../src/services/crawler-job.js', () => ({
 }));
 
 describe('crawlerRoutes', () => {
+  const sqUuid = '550e8400-e29b-41d4-a716-4466554400c1';
+
   it('returns 400 for empty query', async () => {
     const { crawlerRoutes } = await import('../src/routes/crawler.js');
     const app = Fastify({ logger: false });
@@ -19,7 +21,7 @@ describe('crawlerRoutes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/crawler/start',
-      payload: { query: '   ' },
+      payload: { query: '   ', searchQueryUuid: sqUuid },
     });
     expect(res.statusCode).toBe(400);
     await app.close();
@@ -36,11 +38,12 @@ describe('crawlerRoutes', () => {
       headers: {
         'x-joposcragent-correlationid': 'corr-uuid-1',
       },
-      payload: { query: 'python' },
+      payload: { query: 'python', searchQueryUuid: sqUuid },
     });
     expect(res.statusCode).toBe(200);
     expect(runCrawlerJobMock).toHaveBeenCalledWith(
       'python',
+      sqUuid,
       'corr-uuid-1',
       expect.stringMatching(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
@@ -58,11 +61,12 @@ describe('crawlerRoutes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/crawler/start',
-      payload: { query: 'go', lazy: true },
+      payload: { query: 'go', lazy: true, searchQueryUuid: sqUuid },
     });
     expect(res.statusCode).toBe(200);
     expect(runCrawlerJobMock).toHaveBeenCalledWith(
       'go',
+      sqUuid,
       undefined,
       expect.stringMatching(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
@@ -87,12 +91,13 @@ describe('crawlerRoutes', () => {
     const firstRes = await app.inject({
       method: 'POST',
       url: '/crawler/start',
-      payload: { query: 'first' },
+      payload: { query: 'first', searchQueryUuid: sqUuid },
     });
     expect(firstRes.statusCode).toBe(200);
     expect(runCrawlerJobMock).toHaveBeenCalledTimes(1);
     expect(runCrawlerJobMock).toHaveBeenCalledWith(
       'first',
+      sqUuid,
       undefined,
       expect.stringMatching(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
@@ -103,7 +108,7 @@ describe('crawlerRoutes', () => {
     const second = await app.inject({
       method: 'POST',
       url: '/crawler/start',
-      payload: { query: 'second' },
+      payload: { query: 'second', searchQueryUuid: sqUuid },
     });
 
     expect(second.statusCode).toBe(200);
@@ -111,13 +116,14 @@ describe('crawlerRoutes', () => {
     expect(runCrawlerJobMock).toHaveBeenNthCalledWith(
       2,
       'second',
+      sqUuid,
       undefined,
       expect.stringMatching(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       ),
       false,
     );
-    expect(runCrawlerJobMock.mock.calls[0][2]).not.toBe(runCrawlerJobMock.mock.calls[1][2]);
+    expect(runCrawlerJobMock.mock.calls[0][3]).not.toBe(runCrawlerJobMock.mock.calls[1][3]);
 
     release();
     runCrawlerJobMock.mockImplementation(() =>

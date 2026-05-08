@@ -7,7 +7,7 @@ const logger = createServiceLogger('[route]');
 
 const bodySchema = {
   type: 'object',
-  required: ['query'],
+  required: ['query', 'searchQueryUuid'],
   properties: {
     query: {
       type: 'string',
@@ -17,12 +17,17 @@ const bodySchema = {
       type: 'boolean',
       default: false,
     },
+    searchQueryUuid: {
+      type: 'string',
+      format: 'uuid',
+    },
   },
   additionalProperties: false,
 } as const;
 
 interface StartBody {
   query: string;
+  searchQueryUuid: string;
   lazy?: boolean;
 }
 
@@ -48,6 +53,7 @@ export async function crawlerRoutes(fastify: FastifyInstance): Promise<void> {
 
       runCrawlerJob(
         request.body.query.trim(),
+        request.body.searchQueryUuid.trim(),
         correlationId,
         runId,
         request.body.lazy === true,

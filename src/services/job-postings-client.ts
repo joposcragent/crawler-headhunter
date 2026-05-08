@@ -26,6 +26,7 @@ export interface VacancyPayload {
   company: string;
   content: string;
   publicationDate: string;
+  searchQueryUuid: string;
 }
 
 export async function saveVacancy(
@@ -45,6 +46,7 @@ export async function saveVacancy(
       company: payload.company,
       content: payload.content,
       publicationDate: payload.publicationDate,
+      searchQueryUuid: payload.searchQueryUuid,
     },
     requestConfig,
   );
