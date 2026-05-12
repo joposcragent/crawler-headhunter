@@ -159,7 +159,7 @@ export async function runCrawlerJob(
                   () => (document.body as HTMLElement).innerText,
                 );
                 const publicationDate = parsePublicationDateIso(bodyText);
-                await saveVacancy(
+                const created = await saveVacancy(
                   {
                     uuid: jobPostingUuid,
                     uid: card.uid,
@@ -173,8 +173,14 @@ export async function runCrawlerJob(
                   { correlationId },
                 );
 
-                savedCount += 1;
-                logger.info(`Saved vacancy: ${card.uid}`);
+                if (created) {
+                  savedCount += 1;
+                  logger.info(`Saved vacancy: ${card.uid}`);
+                } else {
+                  logger.info(
+                    `Vacancy ${card.uid} already in DB (HTTP 409), skipping — parallel run or duplicate uid`,
+                  );
+                }
               } catch (error) {
                 logger.info(`Error on vacancy ${card.uid}, skipping`, { error });
                 vacancyFetchStatus = 'FAILED';

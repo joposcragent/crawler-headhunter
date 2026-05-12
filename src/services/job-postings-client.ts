@@ -32,22 +32,30 @@ export interface VacancyPayload {
 export async function saveVacancy(
   payload: VacancyPayload,
   options?: { correlationId?: string },
-): Promise<void> {
+): Promise<boolean> {
   const cid = options?.correlationId?.trim() ?? '';
   const requestConfig =
     cid.length > 0 ? { headers: { 'X-Joposcragent-correlationId': cid } } : {};
-  await client.post(
-    `/job-postings/${payload.uuid}`,
-    {
-      uuid: payload.uuid,
-      uid: payload.uid,
-      title: payload.title,
-      url: payload.url,
-      company: payload.company,
-      content: payload.content,
-      publicationDate: payload.publicationDate,
-      searchQueryUuid: payload.searchQueryUuid,
-    },
-    requestConfig,
-  );
+  try {
+    await client.post(
+      `/job-postings/${payload.uuid}`,
+      {
+        uuid: payload.uuid,
+        uid: payload.uid,
+        title: payload.title,
+        url: payload.url,
+        company: payload.company,
+        content: payload.content,
+        publicationDate: payload.publicationDate,
+        searchQueryUuid: payload.searchQueryUuid,
+      },
+      requestConfig,
+    );
+    return true;
+  } catch (error: unknown) {
+    if (axios.isAxiosError(error) && error.response?.status === 409) {
+      return false;
+    }
+    throw error;
+  }
 }

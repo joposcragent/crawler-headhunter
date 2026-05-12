@@ -45,7 +45,7 @@ describe('runCrawlerJob', () => {
     mockCreateBrowser.mockClear();
     mockCreateContext.mockClear();
     mockGetNonExistentUids.mockResolvedValue([]);
-    mockSaveVacancy.mockResolvedValue(undefined);
+    mockSaveVacancy.mockResolvedValue(true);
     mockCreateBrowser.mockResolvedValue({
       close: vi.fn().mockResolvedValue(undefined),
     });
