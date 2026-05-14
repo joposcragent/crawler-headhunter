@@ -14,8 +14,9 @@ export const TYPE_JOB_POSTING_CREATE_BEGIN = 'async-job.job-posting-create-begin
 
 const SCHEMA_VERSION = '1.0';
 
+/** 8-4-4-4-12 hex; без проверки version/variant RFC 4122 (GUID из БД и т.п. могут иметь любые hex-нибблы). */
 const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isUuid(s: string): boolean {
   return UUID_RE.test(s.trim());
