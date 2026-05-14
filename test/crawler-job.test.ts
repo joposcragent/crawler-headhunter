@@ -1,11 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockGetNonExistentUids = vi.fn();
-const mockSaveVacancy = vi.fn();
+const mockPublishBegin = vi.fn();
+const mockPublishSucceeded = vi.fn();
+const mockPublishFailed = vi.fn();
 
 vi.mock('../src/services/job-postings-client.js', () => ({
   getNonExistentUids: (...args: unknown[]) => mockGetNonExistentUids(...args),
-  saveVacancy: (...args: unknown[]) => mockSaveVacancy(...args),
+}));
+
+vi.mock('../src/services/orchestration-kafka.js', () => ({
+  publishJobPostingCreateBegin: (...args: unknown[]) => mockPublishBegin(...args),
+  publishCollectionQuerySucceeded: (...args: unknown[]) => mockPublishSucceeded(...args),
+  publishCollectionQueryFailed: (...args: unknown[]) => mockPublishFailed(...args),
 }));
 
 vi.mock('../src/utils/delay.js', () => ({
@@ -17,6 +24,7 @@ const mockCreateContext = vi.fn();
 
 const RUN_ID = '550e8400-e29b-41d4-a716-446655440aaa';
 const SEARCH_QUERY_UUID = '550e8400-e29b-41d4-a716-4466554400b1';
+const CORRELATION_ID = '550e8400-e29b-41d4-a716-4466554400c2';
 
 vi.mock('../src/utils/browser.js', () => ({
   createBrowser: mockCreateBrowser,
@@ -41,17 +49,21 @@ describe('runCrawlerJob', () => {
   beforeEach(async () => {
     vi.resetModules();
     mockGetNonExistentUids.mockReset();
-    mockSaveVacancy.mockReset();
+    mockPublishBegin.mockReset();
+    mockPublishSucceeded.mockReset();
+    mockPublishFailed.mockReset();
     mockCreateBrowser.mockClear();
     mockCreateContext.mockClear();
     mockGetNonExistentUids.mockResolvedValue([]);
-    mockSaveVacancy.mockResolvedValue(true);
+    mockPublishBegin.mockResolvedValue(undefined);
+    mockPublishSucceeded.mockResolvedValue(undefined);
+    mockPublishFailed.mockResolvedValue(undefined);
     mockCreateBrowser.mockResolvedValue({
       close: vi.fn().mockResolvedValue(undefined),
     });
   });
 
-  it('stops when no vacancy cards and sends finish', async () => {
+  it('stops when no vacancy cards', async () => {
     const $$eval = vi
       .fn()
       .mockResolvedValueOnce([] as string[])
@@ -63,6 +75,8 @@ describe('runCrawlerJob', () => {
     await runCrawlerJob('java', SEARCH_QUERY_UUID, undefined, RUN_ID);
     expect(mockCreateBrowser).toHaveBeenCalledWith(RUN_ID);
     expect($$eval).toHaveBeenCalled();
+    expect(mockPublishSucceeded).not.toHaveBeenCalled();
+    expect(mockPublishFailed).not.toHaveBeenCalled();
   });
 
   it('records job error when getNonExistentUids throws', async () => {
@@ -79,7 +93,7 @@ describe('runCrawlerJob', () => {
     expect(mockGetNonExistentUids).toHaveBeenCalled();
   });
 
-  it('saves new vacancies when pipeline succeeds', async () => {
+  it('publishes job-posting-create-begin when pipeline succeeds', async () => {
     const $$eval = vi
       .fn()
       .mockResolvedValueOnce([] as string[])
@@ -98,11 +112,48 @@ describe('runCrawlerJob', () => {
     mockGetNonExistentUids.mockResolvedValue(['v1']);
     const { runCrawlerJob } = await import('../src/services/crawler-job.js');
     await runCrawlerJob('keyword', SEARCH_QUERY_UUID, undefined, RUN_ID);
-    expect(mockSaveVacancy).toHaveBeenCalledTimes(1);
-    expect(mockSaveVacancy.mock.calls[0][0]).toMatchObject({
+    expect(mockPublishBegin).toHaveBeenCalledTimes(1);
+    expect(mockPublishBegin.mock.calls[0][0]).toMatchObject({
       uid: 'v1',
       title: 'Title',
       searchQueryUuid: SEARCH_QUERY_UUID,
+    });
+    expect(mockPublishBegin.mock.calls[0][0].publicationDate).toMatch(
+      /^2025-01-01T12:00:00\.000Z$/,
+    );
+  });
+
+  it('with correlationId sends collection-query-result SUCCEEDED', async () => {
+    const $$eval = vi
+      .fn()
+      .mockResolvedValueOnce([] as string[])
+      .mockResolvedValueOnce([] as { uid: string }[]);
+    mockCreateContext.mockResolvedValue({
+      newPage: vi.fn().mockResolvedValue(makePage({ $$eval })),
+    });
+    const { runCrawlerJob } = await import('../src/services/crawler-job.js');
+    await runCrawlerJob('java', SEARCH_QUERY_UUID, CORRELATION_ID, RUN_ID);
+    expect(mockPublishSucceeded).toHaveBeenCalledWith({
+      collectionJobUuid: CORRELATION_ID,
+      pagesProcessed: 1,
+      newVacanciesSaved: 0,
+    });
+  });
+
+  it('with correlationId sends FAILED when getNonExistentUids throws', async () => {
+    const $$eval = vi
+      .fn()
+      .mockResolvedValueOnce([] as string[])
+      .mockResolvedValueOnce([{ uid: '1', title: 't', company: 'c', url: 'u' }]);
+    mockCreateContext.mockResolvedValue({
+      newPage: vi.fn().mockResolvedValue(makePage({ $$eval })),
+    });
+    mockGetNonExistentUids.mockRejectedValue(new Error('crud down'));
+    const { runCrawlerJob } = await import('../src/services/crawler-job.js');
+    await runCrawlerJob('q', SEARCH_QUERY_UUID, CORRELATION_ID, RUN_ID);
+    expect(mockPublishFailed).toHaveBeenCalledWith({
+      messageKey: CORRELATION_ID,
+      errorMessage: 'crud down',
     });
   });
 
@@ -120,7 +171,7 @@ describe('runCrawlerJob', () => {
     const { runCrawlerJob } = await import('../src/services/crawler-job.js');
     await runCrawlerJob('keyword', SEARCH_QUERY_UUID, undefined, RUN_ID, true);
     expect($$eval).toHaveBeenCalledTimes(2);
-    expect(mockSaveVacancy).not.toHaveBeenCalled();
+    expect(mockPublishBegin).not.toHaveBeenCalled();
   });
 
   it('with lazy=false continues when first page has no new uids', async () => {
@@ -153,8 +204,8 @@ describe('runCrawlerJob', () => {
     const { runCrawlerJob } = await import('../src/services/crawler-job.js');
     await runCrawlerJob('keyword', SEARCH_QUERY_UUID, undefined, RUN_ID, false);
     expect($$eval).toHaveBeenCalledTimes(3);
-    expect(mockSaveVacancy).toHaveBeenCalledTimes(1);
-    expect(mockSaveVacancy.mock.calls[0][0]).toMatchObject({
+    expect(mockPublishBegin).toHaveBeenCalledTimes(1);
+    expect(mockPublishBegin.mock.calls[0][0]).toMatchObject({
       uid: 'new',
       searchQueryUuid: SEARCH_QUERY_UUID,
     });

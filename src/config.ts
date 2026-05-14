@@ -15,9 +15,12 @@ export const config = {
   baseUrl: optional('BASE_URL', 'https://hh.ru'),
   hhSearchUrl: optional('HH_SEARCH_URL', 'https://hh.ru/search/vacancy?'),
   jobPostingsCrudUrl: optional('JOB_POSTINGS_CRUD_URL', 'http://job-postings-crud:8080'),
-  celeryOrchestratorUrl: optional(
-    'CELERY_ORCHESTRATOR_BASE_URL',
-    'http://celery-orchestrator-api:8000',
+
+  kafkaBootstrapServers: optional('KAFKA_BOOTSTRAP_SERVERS', 'kafka:9092'),
+  kafkaClientId: optional('KAFKA_CLIENT_ID', 'crawler-headhunter'),
+  kafkaConsumerGroupId: optional(
+    'KAFKA_CONSUMER_GROUP_ID',
+    'crawler-headhunter-collection-query',
   ),
 
   delayMinMs: parseInt(optional('DELAY_MIN_MS', '4000'), 10),

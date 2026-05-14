@@ -1,15 +1,12 @@
 import http from 'node:http';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const PORT = 38437;
-
-let lastPostHeaders: http.IncomingHttpHeaders | null = null;
 
 describe('job-postings-client', () => {
   let server: http.Server;
 
   beforeAll(async () => {
-    lastPostHeaders = null;
     server = http.createServer((req, res) => {
       const bodyChunks: Buffer[] = [];
       req.on('data', (c) => bodyChunks.push(c));
@@ -28,30 +25,13 @@ describe('job-postings-client', () => {
           res.end(JSON.stringify({ list: ['new-1'] }));
           return;
         }
-        if (req.url?.startsWith('/job-postings/') && req.method === 'POST') {
-          lastPostHeaders = { ...req.headers };
-          const rawPost = Buffer.concat(bodyChunks).toString();
-          let conflict = false;
-          try {
-            const body = JSON.parse(rawPost) as { uuid?: string };
-            conflict = body.uuid === '00000000-0000-4000-8000-000000000409';
-          } catch {
-            /* ignore */
-          }
-          if (conflict) {
-            res.writeHead(409);
-            res.end('conflict');
-            return;
-          }
-          res.writeHead(201);
-          res.end();
-          return;
-        }
         res.writeHead(404);
         res.end();
       });
     });
     await new Promise<void>((resolve) => server.listen(PORT, '127.0.0.1', resolve));
+    process.env.JOB_POSTINGS_CRUD_URL = `http://127.0.0.1:${PORT}`;
+    vi.resetModules();
   });
 
   afterAll(async () => {
@@ -70,59 +50,5 @@ describe('job-postings-client', () => {
     const { getNonExistentUids } = await import('../src/services/job-postings-client.js');
     const list = await getNonExistentUids(['FORCE404']);
     expect(list).toEqual([]);
-  });
-
-  it('saveVacancy posts payload', async () => {
-    const { saveVacancy } = await import('../src/services/job-postings-client.js');
-    await expect(
-      saveVacancy({
-        uuid: '550e8400-e29b-41d4-a716-446655440010',
-        uid: 'u1',
-        title: 't',
-        url: 'http://x',
-        company: 'c',
-        content: 'body',
-        publicationDate: '2025-01-01',
-        searchQueryUuid: '550e8400-e29b-41d4-a716-4466554400e1',
-      }),
-    ).resolves.toBe(true);
-    expect(lastPostHeaders?.['x-joposcragent-correlationid']).toBeUndefined();
-  });
-
-  it('saveVacancy sends X-Joposcragent-correlationId when correlationId is set', async () => {
-    const { saveVacancy } = await import('../src/services/job-postings-client.js');
-    const cid = '550e8400-e29b-41d4-a716-446655440099';
-    await expect(
-      saveVacancy(
-        {
-          uuid: '550e8400-e29b-41d4-a716-446655440011',
-          uid: 'u2',
-          title: 't2',
-          url: 'http://y',
-          company: 'c2',
-          content: 'b2',
-          publicationDate: '2025-02-02',
-          searchQueryUuid: '550e8400-e29b-41d4-a716-4466554400e2',
-        },
-        { correlationId: cid },
-      ),
-    ).resolves.toBe(true);
-    expect(lastPostHeaders?.['x-joposcragent-correlationid']).toBe(cid);
-  });
-
-  it('saveVacancy returns false on HTTP 409', async () => {
-    const { saveVacancy } = await import('../src/services/job-postings-client.js');
-    await expect(
-      saveVacancy({
-        uuid: '00000000-0000-4000-8000-000000000409',
-        uid: 'u409',
-        title: 't',
-        url: 'http://x',
-        company: 'c',
-        content: 'body',
-        publicationDate: '2025-01-01',
-        searchQueryUuid: '550e8400-e29b-41d4-a716-4466554400e1',
-      }),
-    ).resolves.toBe(false);
   });
 });

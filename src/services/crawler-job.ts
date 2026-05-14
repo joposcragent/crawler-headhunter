@@ -1,11 +1,14 @@
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config.js';
-import { createVacancyLogCapture } from '../logging/vacancy-log-buffer-transport.js';
 import { createServiceLogger } from '../logger.js';
 import { createBrowser, createContext } from '../utils/browser.js';
 import { randomDelay } from '../utils/delay.js';
-import { createEventsProducer } from './events-producer.js';
-import { getNonExistentUids, saveVacancy } from './job-postings-client.js';
+import { getNonExistentUids } from './job-postings-client.js';
+import {
+  publishCollectionQueryFailed,
+  publishCollectionQuerySucceeded,
+  publishJobPostingCreateBegin,
+} from './orchestration-kafka.js';
 import {
   buildSearchUrl,
   parsePublicationDateIso,
@@ -21,6 +24,57 @@ interface CardData {
 
 const NAV_WAIT_UNTIL = 'domcontentloaded' as const;
 
+function formatErrorBrief(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+/** RFC 3339 `date-time` for Kafka payloads (from `YYYY-MM-DD` or ISO). */
+function publicationDateToDateTime(isoOrDay: string): string {
+  const t = isoOrDay.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+    return `${t}T12:00:00.000Z`;
+  }
+  const d = new Date(t);
+  if (!Number.isNaN(d.getTime())) {
+    return d.toISOString();
+  }
+  return new Date().toISOString();
+}
+
+async function sendFinalCollectionResult(
+  log: ReturnType<typeof createServiceLogger>,
+  options: {
+    correlationId: string | undefined;
+    jobError: unknown | null;
+    pagesProcessed: number;
+    newVacanciesSaved: number;
+  },
+): Promise<void> {
+  const cid = options.correlationId?.trim();
+  if (!cid) {
+    return;
+  }
+  try {
+    if (options.jobError != null) {
+      await publishCollectionQueryFailed({
+        messageKey: cid,
+        errorMessage: formatErrorBrief(options.jobError),
+      });
+    } else {
+      await publishCollectionQuerySucceeded({
+        collectionJobUuid: cid,
+        pagesProcessed: options.pagesProcessed,
+        newVacanciesSaved: options.newVacanciesSaved,
+      });
+    }
+  } catch (error: unknown) {
+    log.info('Kafka collection-query-result failed', { error });
+  }
+}
+
 export async function runCrawlerJob(
   searchQuery: string,
   searchQueryUuid: string,
@@ -28,20 +82,17 @@ export async function runCrawlerJob(
   runId: string,
   lazy = false,
 ): Promise<void> {
-  const vacancyLogCapture = createVacancyLogCapture();
-  const logger = createServiceLogger(`[crawler][${runId}]`, {
-    extraTransports: [vacancyLogCapture.transport],
-  });
-  const events = createEventsProducer(correlationId, { runId });
+  const logger = createServiceLogger(`[crawler][${runId}]`);
   let jobError: unknown | null = null;
   let pagesProcessed = 0;
   let savedCount = 0;
+  let browser: Awaited<ReturnType<typeof createBrowser>> | null = null;
 
   logger.info(`Job started for search query: "${searchQuery}"`);
-  const browser = await createBrowser(runId);
 
   try {
     try {
+      browser = await createBrowser(runId);
       const context = await createContext(browser);
       const page = await context.newPage();
 
@@ -133,16 +184,15 @@ export async function runCrawlerJob(
                 'All uids on page already in DB — continuing page loop (lazy=false)',
               );
             } else {
-              logger.info(`${newUids.length} new vacancy(ies) to save`);
+              logger.info(`${newUids.length} new vacancy(ies) to publish`);
             }
 
             const newCards = cards.filter((c) => newUids.includes(c.uid));
             const totalCards = newCards.length;
 
             for (const [index, card] of newCards.entries()) {
-              vacancyLogCapture.begin();
               const jobPostingUuid = uuidv4();
-              let vacancyFetchStatus: 'SUCCEEDED' | 'FAILED' = 'SUCCEEDED';
+              const currentJobUuid = uuidv4();
               try {
                 logger.info(
                   `Fetching vacancy: ${index + 1} of ${totalCards}: ${card.uid} "${card.title}"`,
@@ -158,49 +208,29 @@ export async function runCrawlerJob(
                 const bodyText: string = await page.evaluate(
                   () => (document.body as HTMLElement).innerText,
                 );
-                const publicationDate = parsePublicationDateIso(bodyText);
-                const created = await saveVacancy(
-                  {
-                    uuid: jobPostingUuid,
-                    uid: card.uid,
-                    title: card.title,
-                    url: card.url,
-                    company: card.company,
-                    content,
-                    publicationDate,
-                    searchQueryUuid,
-                  },
-                  { correlationId },
-                );
+                const publicationDay = parsePublicationDateIso(bodyText);
+                const publicationDate = publicationDateToDateTime(publicationDay);
 
-                if (created) {
-                  savedCount += 1;
-                  logger.info(`Saved vacancy: ${card.uid}`);
-                } else {
-                  logger.info(
-                    `Vacancy ${card.uid} already in DB (HTTP 409), skipping — parallel run or duplicate uid`,
-                  );
-                }
+                await publishJobPostingCreateBegin({
+                  currentJobUuid,
+                  jobPostingUuid,
+                  parentJobUuid: correlationId?.trim() || undefined,
+                  searchQueryUuid,
+                  uid: card.uid,
+                  title: card.title,
+                  url: card.url,
+                  company: card.company,
+                  content,
+                  publicationDate,
+                });
+                savedCount += 1;
+                logger.info(`Published job-posting-create-begin: ${card.uid}`);
               } catch (error) {
                 logger.info(`Error on vacancy ${card.uid}, skipping`, { error });
-                vacancyFetchStatus = 'FAILED';
               }
-
-              const executionLog = vacancyLogCapture.takeAndClear();
-              const createdAt = new Date().toISOString();
-              await events.sendVacancyProgress({
-                createdAt,
-                executionLog,
-                jobPostingUuid,
-                status: vacancyFetchStatus,
-              });
             }
           } finally {
             pagesProcessed += 1;
-            await events.sendPageProcessedProgress({
-              currentPage: pageIndex + 1,
-              totalPages: allPageUrls.length,
-            });
           }
         }
       } catch (error) {
@@ -210,15 +240,21 @@ export async function runCrawlerJob(
     } catch (error) {
       jobError = error;
       logger.info('Crawler setup or run failed', { error });
-    } finally {
-      await events.sendFinish({
-        jobError,
-        pagesProcessed,
-        newVacanciesSaved: savedCount,
-      });
     }
   } finally {
-    logger.info('Job complete, closing browser');
-    await browser.close();
+    if (browser !== null) {
+      logger.info('Job complete, closing browser');
+      try {
+        await browser.close();
+      } catch (error: unknown) {
+        logger.info('Browser close failed', { error });
+      }
+    }
+    await sendFinalCollectionResult(logger, {
+      correlationId,
+      jobError,
+      pagesProcessed,
+      newVacanciesSaved: savedCount,
+    });
   }
 }
