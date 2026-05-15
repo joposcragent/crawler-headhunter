@@ -73,20 +73,9 @@ function formatErrorBrief(error: unknown): string {
   return String(error);
 }
 
-function buildEnvelopeJson(options: {
-  messageKey: string;
-  messageType: string;
-  payload: Record<string, unknown>;
-}): { json: string; createdAt: string } {
+function buildPayloadJson(payload: Record<string, unknown>): { json: string; createdAt: string } {
   const createdAt = new Date().toISOString();
-  const headersObj = {
-    key: options.messageKey,
-    createdAt,
-    type: options.messageType,
-    schemaVersion: SCHEMA_VERSION,
-  };
-  const root = { headers: headersObj, payload: options.payload };
-  return { json: JSON.stringify(root), createdAt };
+  return { json: JSON.stringify(payload), createdAt };
 }
 
 function recordHeaders(
@@ -112,11 +101,7 @@ async function sendEnvelope(
   if (!p) {
     throw new Error('Kafka producer is not connected');
   }
-  const { json, createdAt } = buildEnvelopeJson({
-    messageKey,
-    messageType,
-    payload,
-  });
+  const { json, createdAt } = buildPayloadJson(payload);
   await p.send({
     topic,
     messages: [
@@ -256,6 +241,26 @@ function parseCollectionQueryBeginPayload(
   return { ok: true, value: { jobUuid, query, searchQueryUuid, lazy } };
 }
 
+function unwrapPayload(raw: unknown): unknown {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return raw;
+  }
+  const o = raw as Record<string, unknown>;
+  const h = o.headers;
+  const p = o.payload;
+  if (
+    h !== null &&
+    typeof h === 'object' &&
+    !Array.isArray(h) &&
+    p !== null &&
+    typeof p === 'object' &&
+    !Array.isArray(p)
+  ) {
+    return p;
+  }
+  return raw;
+}
+
 function parseTypeFromJson(json: string): string | undefined {
   try {
     const root = JSON.parse(json) as { headers?: { type?: string } };
@@ -310,8 +315,8 @@ export function startCollectionQueryConsumer(runJob: CrawlerRunFn): void {
             }).catch((e) => logger.info('failed to publish FAILED result', { e }));
             return;
           }
-          const root = json as { payload?: unknown };
-          const parsed = parseCollectionQueryBeginPayload(root.payload);
+          const root = unwrapPayload(json);
+          const parsed = parseCollectionQueryBeginPayload(root);
           if (!parsed.ok) {
             logger.info('collection-query-begin: invalid payload', { error: parsed.error });
             await publishCollectionQueryFailed({
