@@ -217,7 +217,12 @@ export async function runCrawlerJob(
                 await randomDelay();
 
                 const contentHtml = await page
-                  .$eval(config.selectorVacancyCardContent, (el) => el.innerHTML)
+                  .$$eval(config.selectorVacancyCardContent, (els) =>
+                    els
+                      .map((el) => el.innerHTML.trim())
+                      .filter((html) => html.length > 0)
+                      .join('\n'),
+                  )
                   .catch(() => '');
                 const content = stripHtml(contentHtml);
 

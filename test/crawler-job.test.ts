@@ -36,13 +36,11 @@ vi.mock('../src/utils/browser.js', () => ({
 function makePage(mocks: {
   $$eval: ReturnType<typeof vi.fn>;
   goto?: ReturnType<typeof vi.fn>;
-  $eval?: ReturnType<typeof vi.fn>;
   evaluate?: ReturnType<typeof vi.fn>;
 }) {
   return {
     goto: mocks.goto ?? vi.fn().mockResolvedValue(undefined),
     $$eval: mocks.$$eval,
-    $eval: mocks.$eval ?? vi.fn(),
     evaluate: mocks.evaluate ?? vi.fn(),
   };
 }
@@ -103,14 +101,14 @@ describe('runCrawlerJob', () => {
       .mockResolvedValueOnce([] as string[])
       .mockResolvedValueOnce([
         { uid: 'v1', title: 'Title', company: 'Co', url: 'https://hh.ru/vacancy/v1' },
-      ]);
-    const $eval = vi.fn().mockResolvedValue('<p>x</p>');
+      ])
+      .mockResolvedValueOnce('<p>x</p>');
     const evaluate = vi
       .fn()
       .mockResolvedValue('Вакансия опубликована 1 января 2025');
     mockCreateContext.mockResolvedValue({
       newPage: vi.fn().mockResolvedValue(
-        makePage({ $$eval, $eval, evaluate }),
+        makePage({ $$eval, evaluate }),
       ),
     });
     mockGetNonExistentUids.mockResolvedValue(['v1']);
@@ -125,6 +123,26 @@ describe('runCrawlerJob', () => {
     expect(mockPublishBegin.mock.calls[0][0].publicationDate).toMatch(
       /^2025-01-01T12:00:00\.000Z$/,
     );
+  });
+
+  it('merges vacancy HTML from multiple description fragments into content', async () => {
+    const $$eval = vi
+      .fn()
+      .mockResolvedValueOnce([] as string[])
+      .mockResolvedValueOnce([
+        { uid: 'v1', title: 'Title', company: 'Co', url: 'https://hh.ru/vacancy/v1' },
+      ])
+      .mockResolvedValueOnce('<p>alpha</p>\n<p>beta</p>');
+    const evaluate = vi
+      .fn()
+      .mockResolvedValue('Вакансия опубликована 1 января 2025');
+    mockCreateContext.mockResolvedValue({
+      newPage: vi.fn().mockResolvedValue(makePage({ $$eval, evaluate })),
+    });
+    mockGetNonExistentUids.mockResolvedValue(['v1']);
+    const { runCrawlerJob } = await import('../src/services/crawler-job.js');
+    await runCrawlerJob('keyword', SEARCH_QUERY_UUID, undefined, RUN_ID);
+    expect(mockPublishBegin.mock.calls[0][0].content).toBe('alpha beta');
   });
 
   it('with correlationId sends collection-query-result CANCELED when no vacancies', async () => {
@@ -174,14 +192,14 @@ describe('runCrawlerJob', () => {
       .mockResolvedValueOnce([] as string[])
       .mockResolvedValueOnce([
         { uid: 'v1', title: 'Title', company: 'Co', url: 'https://hh.ru/vacancy/v1' },
-      ]);
-    const $eval = vi.fn().mockResolvedValue('<p>x</p>');
+      ])
+      .mockResolvedValueOnce('<p>x</p>');
     const evaluate = vi
       .fn()
       .mockResolvedValue('Вакансия опубликована 1 января 2025');
     mockCreateContext.mockResolvedValue({
       newPage: vi.fn().mockResolvedValue(
-        makePage({ $$eval, $eval, evaluate }),
+        makePage({ $$eval, evaluate }),
       ),
     });
     mockGetNonExistentUids.mockResolvedValue(['v1']);
@@ -245,14 +263,14 @@ describe('runCrawlerJob', () => {
           company: 'C2',
           url: 'http://hh.ru/vacancy/new',
         },
-      ]);
-    const $eval = vi.fn().mockResolvedValue('<p>x</p>');
+      ])
+      .mockResolvedValueOnce('<p>x</p>');
     const evaluate = vi
       .fn()
       .mockResolvedValue('Вакансия опубликована 1 января 2025');
     mockCreateContext.mockResolvedValue({
       newPage: vi.fn().mockResolvedValue(
-        makePage({ $$eval, $eval, evaluate }),
+        makePage({ $$eval, evaluate }),
       ),
     });
     mockGetNonExistentUids
@@ -260,7 +278,7 @@ describe('runCrawlerJob', () => {
       .mockResolvedValueOnce(['new']);
     const { runCrawlerJob } = await import('../src/services/crawler-job.js');
     await runCrawlerJob('keyword', SEARCH_QUERY_UUID, undefined, RUN_ID, false);
-    expect($$eval).toHaveBeenCalledTimes(3);
+    expect($$eval).toHaveBeenCalledTimes(4);
     expect(mockPublishBegin).toHaveBeenCalledTimes(1);
     expect(mockPublishBegin.mock.calls[0][0]).toMatchObject({
       uid: 'new',
