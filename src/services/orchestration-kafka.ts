@@ -195,20 +195,39 @@ export async function publishCollectionQuerySucceeded(options: {
   });
 }
 
+export async function publishCollectionQueryCanceled(options: {
+  collectionJobUuid: string;
+  pagesProcessed: number;
+  newVacanciesSaved: number;
+  result: string;
+}): Promise<void> {
+  const key = options.collectionJobUuid;
+  await sendEnvelope(TOPIC_COLLECTION_QUERY, key, TYPE_COLLECTION_QUERY_RESULT, {
+    jobUuid: options.collectionJobUuid,
+    pagesProcessed: options.pagesProcessed,
+    newVacanciesSaved: options.newVacanciesSaved,
+    status: 'CANCELED',
+    result: options.result,
+  });
+}
+
 export async function publishCollectionQueryFailed(options: {
   messageKey: string;
-  errorMessage: string,
+  errorMessage: string;
+  pagesProcessed?: number;
+  newVacanciesSaved?: number;
 }): Promise<void> {
   const key = options.messageKey;
   await sendEnvelope(TOPIC_COLLECTION_QUERY, key, TYPE_COLLECTION_QUERY_RESULT, {
     jobUuid: key,
+    pagesProcessed: options.pagesProcessed ?? 0,
+    newVacanciesSaved: options.newVacanciesSaved ?? 0,
     status: 'FAILED',
     result: options.errorMessage,
   });
 }
 
 type CollectionQueryBeginPayload = {
-  jobUuid: string;
   query: string;
   searchQueryUuid: string;
   lazy: boolean;
@@ -221,24 +240,19 @@ function parseCollectionQueryBeginPayload(
     return { ok: false, error: 'payload is not an object' };
   }
   const o = raw as Record<string, unknown>;
-  const jobUuid =
-    typeof o.jobUuid === 'string' && isUuid(o.jobUuid) ? o.jobUuid.trim() : '';
   const query = typeof o.query === 'string' ? o.query.trim() : '';
   const searchQueryUuid =
     typeof o.searchQueryUuid === 'string' && isUuid(o.searchQueryUuid)
       ? o.searchQueryUuid.trim()
       : '';
   const lazy = o.lazy === true;
-  if (!jobUuid) {
-    return { ok: false, error: 'missing or invalid jobUuid' };
-  }
   if (!query) {
     return { ok: false, error: 'missing or empty query' };
   }
   if (!searchQueryUuid) {
     return { ok: false, error: 'missing or invalid searchQueryUuid' };
   }
-  return { ok: true, value: { jobUuid, query, searchQueryUuid, lazy } };
+  return { ok: true, value: { query, searchQueryUuid, lazy } };
 }
 
 function unwrapPayload(raw: unknown): unknown {
@@ -259,16 +273,6 @@ function unwrapPayload(raw: unknown): unknown {
     return p;
   }
   return raw;
-}
-
-function parseTypeFromJson(json: string): string | undefined {
-  try {
-    const root = JSON.parse(json) as { headers?: { type?: string } };
-    const t = root.headers?.type;
-    return typeof t === 'string' ? t : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 export type CrawlerRunFn = (
@@ -297,42 +301,51 @@ export function startCollectionQueryConsumer(runJob: CrawlerRunFn): void {
       });
       await consumer.run({
         eachMessage: async ({ message }) => {
-          const type =
-            headerStrings(message.headers, 'type') ??
-            (message.value ? parseTypeFromJson(message.value.toString('utf8')) : undefined);
+          const type = headerStrings(message.headers, 'type');
           if (type !== TYPE_COLLECTION_QUERY_BEGIN) {
             return;
           }
-          const key = messageKeyString(message.key);
+          const keyHeader = headerStrings(message.headers, 'key');
+          const keyFromRecord = messageKeyString(message.key);
+          const jobUuid = (keyHeader?.trim() || keyFromRecord.trim()) || '';
           let json: unknown;
           try {
             json = JSON.parse(message.value?.toString('utf8') ?? 'null');
           } catch {
-            logger.info('collection-query-begin: invalid json');
+            logger.error('collection-query-begin: invalid json');
+            const failKey = isUuid(jobUuid) ? jobUuid : randomUUID();
             await publishCollectionQueryFailed({
-              messageKey: key || randomUUID(),
+              messageKey: failKey,
               errorMessage: 'invalid message json',
             }).catch((e) => logger.info('failed to publish FAILED result', { e }));
             return;
           }
           const root = unwrapPayload(json);
           const parsed = parseCollectionQueryBeginPayload(root);
-          if (!parsed.ok) {
-            logger.info('collection-query-begin: invalid payload', { error: parsed.error });
+          const keyOk = jobUuid.length > 0 && isUuid(jobUuid);
+          if (!parsed.ok || !keyOk) {
+            const errParts = [
+              !keyOk ? 'missing or invalid message key (header key / record key)' : '',
+              !parsed.ok ? parsed.error : '',
+            ].filter(Boolean);
+            logger.error('collection-query-begin: invalid message', {
+              error: errParts.join('; '),
+            });
+            const failKey = keyOk ? jobUuid : randomUUID();
             await publishCollectionQueryFailed({
-              messageKey: key || randomUUID(),
-              errorMessage: parsed.error,
+              messageKey: failKey,
+              errorMessage: errParts.join('; ') || 'invalid message',
             }).catch((e) => logger.info('failed to publish FAILED result', { e }));
             return;
           }
-          const { jobUuid, query, searchQueryUuid, lazy } = parsed.value;
+          const { query, searchQueryUuid, lazy } = parsed.value;
           const runId = `kafka-${jobUuid}`;
           try {
             await runJob(query, searchQueryUuid, jobUuid, runId, lazy);
           } catch (error: unknown) {
-            logger.info('collection-query-begin: job failed', { error });
+            logger.error('collection-query-begin: job failed', { error });
             await publishCollectionQueryFailed({
-              messageKey: key || jobUuid,
+              messageKey: jobUuid,
               errorMessage: formatErrorBrief(error),
             }).catch((e) => logger.info('failed to publish FAILED result', { e }));
           }

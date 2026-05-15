@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mockGetNonExistentUids = vi.fn();
 const mockPublishBegin = vi.fn();
 const mockPublishSucceeded = vi.fn();
+const mockPublishCanceled = vi.fn();
 const mockPublishFailed = vi.fn();
 
 vi.mock('../src/services/job-postings-client.js', () => ({
@@ -12,6 +13,7 @@ vi.mock('../src/services/job-postings-client.js', () => ({
 vi.mock('../src/services/orchestration-kafka.js', () => ({
   publishJobPostingCreateBegin: (...args: unknown[]) => mockPublishBegin(...args),
   publishCollectionQuerySucceeded: (...args: unknown[]) => mockPublishSucceeded(...args),
+  publishCollectionQueryCanceled: (...args: unknown[]) => mockPublishCanceled(...args),
   publishCollectionQueryFailed: (...args: unknown[]) => mockPublishFailed(...args),
 }));
 
@@ -51,12 +53,14 @@ describe('runCrawlerJob', () => {
     mockGetNonExistentUids.mockReset();
     mockPublishBegin.mockReset();
     mockPublishSucceeded.mockReset();
+    mockPublishCanceled.mockReset();
     mockPublishFailed.mockReset();
     mockCreateBrowser.mockClear();
     mockCreateContext.mockClear();
     mockGetNonExistentUids.mockResolvedValue([]);
     mockPublishBegin.mockResolvedValue(undefined);
     mockPublishSucceeded.mockResolvedValue(undefined);
+    mockPublishCanceled.mockResolvedValue(undefined);
     mockPublishFailed.mockResolvedValue(undefined);
     mockCreateBrowser.mockResolvedValue({
       close: vi.fn().mockResolvedValue(undefined),
@@ -123,7 +127,7 @@ describe('runCrawlerJob', () => {
     );
   });
 
-  it('with correlationId sends collection-query-result SUCCEEDED', async () => {
+  it('with correlationId sends collection-query-result CANCELED when no vacancies', async () => {
     const $$eval = vi
       .fn()
       .mockResolvedValueOnce([] as string[])
@@ -133,11 +137,62 @@ describe('runCrawlerJob', () => {
     });
     const { runCrawlerJob } = await import('../src/services/crawler-job.js');
     await runCrawlerJob('java', SEARCH_QUERY_UUID, CORRELATION_ID, RUN_ID);
-    expect(mockPublishSucceeded).toHaveBeenCalledWith({
+    expect(mockPublishCanceled).toHaveBeenCalledWith({
       collectionJobUuid: CORRELATION_ID,
       pagesProcessed: 1,
       newVacanciesSaved: 0,
+      result: 'По запросу не найдено ни одной вакансии.',
     });
+    expect(mockPublishSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('with correlationId sends CANCELED when vacancies exist but none are new', async () => {
+    const $$eval = vi
+      .fn()
+      .mockResolvedValueOnce([] as string[])
+      .mockResolvedValueOnce([
+        { uid: 'old', title: 't', company: 'c', url: 'http://hh.ru/vacancy/old' },
+      ]);
+    mockCreateContext.mockResolvedValue({
+      newPage: vi.fn().mockResolvedValue(makePage({ $$eval })),
+    });
+    mockGetNonExistentUids.mockResolvedValue([]);
+    const { runCrawlerJob } = await import('../src/services/crawler-job.js');
+    await runCrawlerJob('keyword', SEARCH_QUERY_UUID, CORRELATION_ID, RUN_ID, true);
+    expect(mockPublishCanceled).toHaveBeenCalledWith({
+      collectionJobUuid: CORRELATION_ID,
+      pagesProcessed: 1,
+      newVacanciesSaved: 0,
+      result: 'Вакансии по запросу есть, но новых для сохранения нет.',
+    });
+    expect(mockPublishSucceeded).not.toHaveBeenCalled();
+  });
+
+  it('with correlationId sends SUCCEEDED when at least one new vacancy is saved', async () => {
+    const $$eval = vi
+      .fn()
+      .mockResolvedValueOnce([] as string[])
+      .mockResolvedValueOnce([
+        { uid: 'v1', title: 'Title', company: 'Co', url: 'https://hh.ru/vacancy/v1' },
+      ]);
+    const $eval = vi.fn().mockResolvedValue('<p>x</p>');
+    const evaluate = vi
+      .fn()
+      .mockResolvedValue('Вакансия опубликована 1 января 2025');
+    mockCreateContext.mockResolvedValue({
+      newPage: vi.fn().mockResolvedValue(
+        makePage({ $$eval, $eval, evaluate }),
+      ),
+    });
+    mockGetNonExistentUids.mockResolvedValue(['v1']);
+    const { runCrawlerJob } = await import('../src/services/crawler-job.js');
+    await runCrawlerJob('keyword', SEARCH_QUERY_UUID, CORRELATION_ID, RUN_ID);
+    expect(mockPublishSucceeded).toHaveBeenCalledWith({
+      collectionJobUuid: CORRELATION_ID,
+      pagesProcessed: 1,
+      newVacanciesSaved: 1,
+    });
+    expect(mockPublishCanceled).not.toHaveBeenCalled();
   });
 
   it('with correlationId sends FAILED when getNonExistentUids throws', async () => {
@@ -154,6 +209,8 @@ describe('runCrawlerJob', () => {
     expect(mockPublishFailed).toHaveBeenCalledWith({
       messageKey: CORRELATION_ID,
       errorMessage: 'crud down',
+      pagesProcessed: 1,
+      newVacanciesSaved: 0,
     });
   });
 

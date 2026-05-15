@@ -5,6 +5,7 @@ import { createBrowser, createContext } from '../utils/browser.js';
 import { randomDelay } from '../utils/delay.js';
 import { getNonExistentUids } from './job-postings-client.js';
 import {
+  publishCollectionQueryCanceled,
   publishCollectionQueryFailed,
   publishCollectionQuerySucceeded,
   publishJobPostingCreateBegin,
@@ -51,6 +52,7 @@ async function sendFinalCollectionResult(
     jobError: unknown | null;
     pagesProcessed: number;
     newVacanciesSaved: number;
+    sawAnyVacancyCards: boolean;
   },
 ): Promise<void> {
   const cid = options.correlationId?.trim();
@@ -62,6 +64,18 @@ async function sendFinalCollectionResult(
       await publishCollectionQueryFailed({
         messageKey: cid,
         errorMessage: formatErrorBrief(options.jobError),
+        pagesProcessed: options.pagesProcessed,
+        newVacanciesSaved: options.newVacanciesSaved,
+      });
+    } else if (options.newVacanciesSaved === 0) {
+      const result = options.sawAnyVacancyCards
+        ? 'Вакансии по запросу есть, но новых для сохранения нет.'
+        : 'По запросу не найдено ни одной вакансии.';
+      await publishCollectionQueryCanceled({
+        collectionJobUuid: cid,
+        pagesProcessed: options.pagesProcessed,
+        newVacanciesSaved: 0,
+        result,
       });
     } else {
       await publishCollectionQuerySucceeded({
@@ -86,6 +100,7 @@ export async function runCrawlerJob(
   let jobError: unknown | null = null;
   let pagesProcessed = 0;
   let savedCount = 0;
+  let sawAnyVacancyCards = false;
   let browser: Awaited<ReturnType<typeof createBrowser>> | null = null;
 
   logger.info(`Job started for search query: "${searchQuery}"`);
@@ -161,6 +176,7 @@ export async function runCrawlerJob(
               break;
             }
 
+            sawAnyVacancyCards = true;
             logger.info(`Found ${uids.length} vacancy cards on page`);
 
             let newUids: string[];
@@ -255,6 +271,7 @@ export async function runCrawlerJob(
       jobError,
       pagesProcessed,
       newVacanciesSaved: savedCount,
+      sawAnyVacancyCards,
     });
   }
 }
