@@ -283,6 +283,62 @@ export type CrawlerRunFn = (
   lazy?: boolean,
 ) => Promise<void>;
 
+const CONSUMER_HEARTBEAT_TICK_MS = 5000;
+
+async function handleCollectionQueryMessage(
+  runJob: CrawlerRunFn,
+  message: { headers?: IHeaders; key: Buffer | null; value: Buffer | null },
+): Promise<void> {
+  const type = headerStrings(message.headers, 'type');
+  if (type !== TYPE_COLLECTION_QUERY_BEGIN) {
+    return;
+  }
+  const keyHeader = headerStrings(message.headers, 'key');
+  const keyFromRecord = messageKeyString(message.key);
+  const jobUuid = (keyHeader?.trim() || keyFromRecord.trim()) || '';
+  let json: unknown;
+  try {
+    json = JSON.parse(message.value?.toString('utf8') ?? 'null');
+  } catch {
+    logger.error('collection-query-begin: invalid json');
+    const failKey = isUuid(jobUuid) ? jobUuid : randomUUID();
+    await publishCollectionQueryFailed({
+      messageKey: failKey,
+      errorMessage: 'invalid message json',
+    }).catch((e) => logger.info('failed to publish FAILED result', { e }));
+    return;
+  }
+  const root = unwrapPayload(json);
+  const parsed = parseCollectionQueryBeginPayload(root);
+  const keyOk = jobUuid.length > 0 && isUuid(jobUuid);
+  if (!parsed.ok || !keyOk) {
+    const errParts = [
+      !keyOk ? 'missing or invalid message key (header key / record key)' : '',
+      !parsed.ok ? parsed.error : '',
+    ].filter(Boolean);
+    logger.error('collection-query-begin: invalid message', {
+      error: errParts.join('; '),
+    });
+    const failKey = keyOk ? jobUuid : randomUUID();
+    await publishCollectionQueryFailed({
+      messageKey: failKey,
+      errorMessage: errParts.join('; ') || 'invalid message',
+    }).catch((e) => logger.info('failed to publish FAILED result', { e }));
+    return;
+  }
+  const { query, searchQueryUuid, lazy } = parsed.value;
+  const runId = `kafka-${jobUuid}`;
+  try {
+    await runJob(query, searchQueryUuid, jobUuid, runId, lazy);
+  } catch (error: unknown) {
+    logger.error('collection-query-begin: job failed', { error });
+    await publishCollectionQueryFailed({
+      messageKey: jobUuid,
+      errorMessage: formatErrorBrief(error),
+    }).catch((e) => logger.info('failed to publish FAILED result', { e }));
+  }
+}
+
 export function startCollectionQueryConsumer(runJob: CrawlerRunFn): void {
   void (async () => {
     try {
@@ -300,54 +356,34 @@ export function startCollectionQueryConsumer(runJob: CrawlerRunFn): void {
         groupId: config.kafkaConsumerGroupId,
       });
       await consumer.run({
-        eachMessage: async ({ message }) => {
-          const type = headerStrings(message.headers, 'type');
-          if (type !== TYPE_COLLECTION_QUERY_BEGIN) {
-            return;
-          }
-          const keyHeader = headerStrings(message.headers, 'key');
-          const keyFromRecord = messageKeyString(message.key);
-          const jobUuid = (keyHeader?.trim() || keyFromRecord.trim()) || '';
-          let json: unknown;
-          try {
-            json = JSON.parse(message.value?.toString('utf8') ?? 'null');
-          } catch {
-            logger.error('collection-query-begin: invalid json');
-            const failKey = isUuid(jobUuid) ? jobUuid : randomUUID();
-            await publishCollectionQueryFailed({
-              messageKey: failKey,
-              errorMessage: 'invalid message json',
-            }).catch((e) => logger.info('failed to publish FAILED result', { e }));
-            return;
-          }
-          const root = unwrapPayload(json);
-          const parsed = parseCollectionQueryBeginPayload(root);
-          const keyOk = jobUuid.length > 0 && isUuid(jobUuid);
-          if (!parsed.ok || !keyOk) {
-            const errParts = [
-              !keyOk ? 'missing or invalid message key (header key / record key)' : '',
-              !parsed.ok ? parsed.error : '',
-            ].filter(Boolean);
-            logger.error('collection-query-begin: invalid message', {
-              error: errParts.join('; '),
-            });
-            const failKey = keyOk ? jobUuid : randomUUID();
-            await publishCollectionQueryFailed({
-              messageKey: failKey,
-              errorMessage: errParts.join('; ') || 'invalid message',
-            }).catch((e) => logger.info('failed to publish FAILED result', { e }));
-            return;
-          }
-          const { query, searchQueryUuid, lazy } = parsed.value;
-          const runId = `kafka-${jobUuid}`;
-          try {
-            await runJob(query, searchQueryUuid, jobUuid, runId, lazy);
-          } catch (error: unknown) {
-            logger.error('collection-query-begin: job failed', { error });
-            await publishCollectionQueryFailed({
-              messageKey: jobUuid,
-              errorMessage: formatErrorBrief(error),
-            }).catch((e) => logger.info('failed to publish FAILED result', { e }));
+        eachBatchAutoResolve: false,
+        eachBatch: async ({
+          batch,
+          heartbeat,
+          resolveOffset,
+          commitOffsetsIfNecessary,
+          isRunning,
+          isStale,
+        }) => {
+          for (const message of batch.messages) {
+            if (!isRunning() || isStale()) {
+              break;
+            }
+            const heartbeatTimer = setInterval(() => {
+              void heartbeat().catch((error: unknown) => {
+                logger.info('Kafka consumer heartbeat failed during message processing', {
+                  error,
+                });
+              });
+            }, CONSUMER_HEARTBEAT_TICK_MS);
+            try {
+              await handleCollectionQueryMessage(runJob, message);
+            } finally {
+              clearInterval(heartbeatTimer);
+            }
+            resolveOffset(message.offset);
+            await commitOffsetsIfNecessary();
+            await heartbeat();
           }
         },
       });
